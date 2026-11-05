@@ -72,8 +72,9 @@ jobs:
           TITLE: ${{ steps.check.outputs.title }}
         run: |
           node -e "JSON.parse(require('fs').readFileSync('config/remote.json', 'utf8'))"
-          # Only config/remote.json may change.
-          test "$(git status --porcelain | grep -v ' config/remote.json$' | grep -v 'moon-sighting-issue.md' | wc -l)" = "0"
+          # Only config/remote.json may change (app/ is the app checkout and moon-sighting-issue.md
+          # the issue text; both are untracked and never committed).
+          test "$(git status --porcelain | grep -v ' config/remote.json$' | grep -v ' app/$' | grep -v 'moon-sighting-issue.md' | wc -l)" = "0"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add config/remote.json
