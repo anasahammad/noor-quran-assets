@@ -58,9 +58,10 @@ jobs:
             src/config/countries
             scripts/moon-sighting
 
-      - uses: actions/setup-node@v4
+      # The same Node as the app repo (its .nvmrc; a root file, so the sparse checkout has it).
+      - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version-file: app/.nvmrc
 
       - name: Check this evening's decision
         id: check
