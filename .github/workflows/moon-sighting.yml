@@ -30,16 +30,27 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out this repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      # The app repo is read with a read-only SSH deploy key (no personal token).
+      - name: Require the app repo deploy key
+        env:
+          APP_REPO_DEPLOY_KEY: ${{ secrets.APP_REPO_DEPLOY_KEY }}
+        run: |
+          if [ -z "$APP_REPO_DEPLOY_KEY" ]; then
+            echo "::error title=Missing secret APP_REPO_DEPLOY_KEY::Add the private key of the read-only deploy key on anasahammad/noor-al-quran as the Actions secret APP_REPO_DEPLOY_KEY (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
 
       - name: Check out the app (the calendar code the app runs)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: anasahammad/noor-al-quran
+          ssh-key: ${{ secrets.APP_REPO_DEPLOY_KEY }}
           ref: main
           path: app
           sparse-checkout: |
