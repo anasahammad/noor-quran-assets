@@ -12,11 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Report only (no commit, no issue)'
+        description: 'Dry run: read the sources and print what would happen, but commit nothing and open no issue. Untick only for a real run.'
         type: boolean
         default: true
       now:
-        description: 'Pretend it is this time, e.g. 2026-11-10T20:00:00+06:00 (optional)'
+        description: 'Optional test time, ISO 8601 with an offset, e.g. 2026-11-10T20:00:00+06:00 (8 pm Dhaka) or 2026-11-10T14:00:00Z. Leave empty for the real current time. Anything else fails the run.'
+        type: string
         required: false
         default: ''
 
@@ -75,8 +76,15 @@ jobs:
           args=(--remote config/remote.json)
           if [ -f config/moon-sighting-sources.json ]; then args+=(--sources config/moon-sighting-sources.json); fi
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
-          if [ -n "$NOW" ]; then args+=(--now "$NOW"); fi
-          node app/scripts/moon-sighting/check.ts "${args[@]}"
+          # Spaces from pasting are trimmed; the script validates the rest and fails on anything
+          # that is not an ISO date-time with an offset (it never falls back to another date).
+          now_trimmed="${NOW#"${NOW%%[![:space:]]*}"}"
+          now_trimmed="${now_trimmed%"${now_trimmed##*[![:space:]]}"}"
+          if [ -n "$now_trimmed" ]; then args+=(--now "$now_trimmed"); fi
+          echo "Run: dry_run=${DRY_RUN:-false}, now=${now_trimmed:-<current time>}"
+          # Node runs the app's .ts files as ES modules; the flag hides its notice about the
+          # app's package.json having no "type" (which stays unchanged).
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON app/scripts/moon-sighting/check.ts "${args[@]}"
 
       - name: Commit the new month start and purge jsDelivr
         if: steps.check.outputs.action == 'commit'
