@@ -1,0 +1,322 @@
+{
+  "schema": 1,
+  "updated": "2026-11-11",
+  "collections": [
+    {
+      "id": "before-sleep",
+      "category": "amal",
+      "icon": "moon",
+      "surahs": [32, 67],
+      "sources": ["tirmidhi"],
+      "showWhen": ["night"],
+      "title": {
+        "bn": "ঘুমের আগে",
+        "en": "Before sleep"
+      },
+      "note": {
+        "bn": "নবীজি (সা.) এই দুই সূরা না পড়ে ঘুমাতেন না।",
+        "en": "The Prophet (peace be upon him) would not sleep until he had recited these two surahs."
+      }
+    },
+    {
+      "id": "friday-kahf",
+      "category": "amal",
+      "icon": "mosque",
+      "surahs": [18],
+      "sources": ["hakim", "bayhaqi"],
+      "showWhen": ["friday"],
+      "title": {
+        "bn": "জুমার দিন",
+        "en": "Friday"
+      },
+      "note": {
+        "bn": "জুমার দিনে সূরা কাহফ পড়লে দুই জুমার মাঝের সময়টা তার জন্য নূরে আলোকিত হয়।",
+        "en": "Whoever recites Al-Kahf on Friday has light shining for them between the two Fridays."
+      }
+    },
+    {
+      "id": "three-quls",
+      "category": "amal",
+      "icon": "shield",
+      "surahs": [112, 113, 114],
+      "sources": ["abu-dawud", "tirmidhi"],
+      "showWhen": ["morning", "evening"],
+      "title": {
+        "bn": "তিন কুল",
+        "en": "The three Quls"
+      },
+      "note": {
+        "bn": "সকাল ও সন্ধ্যায় তিনবার করে পড়লে সব কিছুর জন্য যথেষ্ট হয়।",
+        "en": "Recited three times each morning and evening, they suffice a person against everything."
+      }
+    },
+    {
+      "id": "fajr-sunnah",
+      "category": "amal",
+      "icon": "sun",
+      "surahs": [109, 112],
+      "sources": ["muslim"],
+      "showWhen": ["morning"],
+      "title": {
+        "bn": "ফজরের সুন্নাত",
+        "en": "Sunnah of Fajr"
+      },
+      "note": {
+        "bn": "নবীজি (সা.) ফজরের দুই রাকাত সুন্নাতে এই দুই সূরা পড়তেন।",
+        "en": "The Prophet (peace be upon him) recited these two surahs in the two sunnah rak'ahs of Fajr."
+      }
+    },
+    {
+      "id": "witr",
+      "category": "amal",
+      "icon": "moon",
+      "surahs": [87, 109, 112],
+      "sources": ["nasai", "tirmidhi"],
+      "showWhen": ["night"],
+      "title": {
+        "bn": "বিতরের সূরা",
+        "en": "Surahs of Witr"
+      },
+      "note": {
+        "bn": "নবীজি (সা.) বিতরের তিন রাকাতে এই তিন সূরা পড়তেন।",
+        "en": "The Prophet (peace be upon him) recited these three surahs in the three rak'ahs of Witr."
+      }
+    },
+    {
+      "id": "friday-fajr",
+      "category": "amal",
+      "icon": "sun",
+      "surahs": [32, 76],
+      "sources": ["bukhari", "muslim"],
+      "showWhen": ["friday"],
+      "title": {
+        "bn": "জুমার ফজর",
+        "en": "Fajr on Friday"
+      },
+      "note": {
+        "bn": "নবীজি (সা.) জুমার দিন ফজরের সালাতে এই দুই সূরা পড়তেন।",
+        "en": "The Prophet (peace be upon him) recited these two surahs in the Fajr prayer on Fridays."
+      }
+    },
+    {
+      "id": "jumuah-eid",
+      "category": "amal",
+      "icon": "mosque",
+      "surahs": [87, 88],
+      "sources": ["muslim"],
+      "showWhen": ["friday"],
+      "title": {
+        "bn": "জুমা ও ঈদের সালাত",
+        "en": "Jumu'ah and Eid prayers"
+      },
+      "note": {
+        "bn": "নবীজি (সা.) জুমা ও দুই ঈদের সালাতে এই দুই সূরা পড়তেন।",
+        "en": "The Prophet (peace be upon him) recited these two surahs in the Jumu'ah and the two Eid prayers."
+      }
+    },
+    {
+      "id": "jumuah-munafiqun",
+      "category": "amal",
+      "icon": "mosque",
+      "surahs": [62, 63],
+      "sources": ["muslim"],
+      "showWhen": ["friday"],
+      "title": {
+        "bn": "জুমার সালাতের সূরা",
+        "en": "Surahs of the Jumu'ah prayer"
+      },
+      "note": {
+        "bn": "নবীজি (সা.) জুমার সালাতে এই দুই সূরাও পড়তেন।",
+        "en": "The Prophet (peace be upon him) also recited these two surahs in the Jumu'ah prayer."
+      }
+    },
+    {
+      "id": "stories-of-prophets",
+      "category": "theme",
+      "icon": "book",
+      "surahs": [11, 12, 14, 19, 20, 21, 28, 71],
+      "title": {
+        "bn": "নবীদের কাহিনী",
+        "en": "Stories of the prophets"
+      },
+      "note": {
+        "bn": "যে সূরাগুলোতে নবীদের জীবনের ঘটনা বিস্তারিত এসেছে।",
+        "en": "Surahs that tell the stories of the prophets at length."
+      }
+    },
+    {
+      "id": "comfort",
+      "category": "theme",
+      "icon": "heart",
+      "surahs": [93, 94, 12, 13, 55],
+      "title": {
+        "bn": "প্রশান্তির সূরা",
+        "en": "Surahs of comfort"
+      },
+      "note": {
+        "bn": "মন ভারী লাগলে শোনার জন্য আমাদের বাছাই।",
+        "en": "Our selection to listen to when the heart feels heavy."
+      }
+    },
+    {
+      "id": "paradise",
+      "category": "theme",
+      "icon": "leaf",
+      "surahs": [55, 56, 76, 88],
+      "title": {
+        "bn": "জান্নাতের বর্ণনা",
+        "en": "Descriptions of Paradise"
+      },
+      "note": {
+        "bn": "যে সূরাগুলোতে জান্নাতের নিয়ামতের বর্ণনা আছে।",
+        "en": "Surahs that describe the blessings of Paradise."
+      }
+    },
+    {
+      "id": "day-of-judgment",
+      "category": "theme",
+      "icon": "scale",
+      "surahs": [75, 78, 81, 82, 99, 101],
+      "title": {
+        "bn": "কিয়ামতের দৃশ্য",
+        "en": "Scenes of the Last Day"
+      },
+      "note": {
+        "bn": "কিয়ামতের দিনের দৃশ্য নিয়ে ছোট ছোট সূরা।",
+        "en": "Short surahs about the scenes of the Day of Resurrection."
+      }
+    },
+    {
+      "id": "gratitude",
+      "category": "theme",
+      "icon": "sun",
+      "surahs": [16, 55, 93, 106],
+      "title": {
+        "bn": "নিয়ামত ও শুকরিয়া",
+        "en": "Blessings and gratitude"
+      },
+      "note": {
+        "bn": "আল্লাহর নিয়ামত মনে করিয়ে দেয় এমন সূরা।",
+        "en": "Surahs that remind us of Allah's blessings."
+      }
+    },
+    {
+      "id": "character",
+      "category": "theme",
+      "icon": "heart",
+      "surahs": [17, 24, 31, 49],
+      "title": {
+        "bn": "আদব ও চরিত্র",
+        "en": "Manners and character"
+      },
+      "note": {
+        "bn": "পরিবার, সমাজ ও আচরণ নিয়ে উপদেশ আছে এমন সূরা।",
+        "en": "Surahs with guidance on family, society and conduct."
+      }
+    },
+    {
+      "id": "repentance-and-mercy",
+      "category": "theme",
+      "icon": "leaf",
+      "surahs": [39, 40, 66, 71],
+      "title": {
+        "bn": "তাওবা ও রহমত",
+        "en": "Repentance and mercy"
+      },
+      "note": {
+        "bn": "ক্ষমা চাওয়া ও আল্লাহর রহমতের কথা আছে এমন সূরা।",
+        "en": "Surahs about seeking forgiveness and the mercy of Allah."
+      }
+    },
+    {
+      "id": "juz-amma",
+      "category": "series",
+      "icon": "book",
+      "surahs": [78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114],
+      "title": {
+        "bn": "আমপারা",
+        "en": "Juz Amma"
+      },
+      "subtitle": {
+        "bn": "৩৭টি সূরা · ৭৮ থেকে ১১৪",
+        "en": "37 surahs · 78 to 114"
+      },
+      "note": {
+        "bn": "কুরআনের শেষ পারা।",
+        "en": "The last juz of the Quran."
+      }
+    },
+    {
+      "id": "juz-tabarak",
+      "category": "series",
+      "icon": "book",
+      "surahs": [67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77],
+      "title": {
+        "bn": "তাবারাক পারা",
+        "en": "Juz Tabarak"
+      },
+      "subtitle": {
+        "bn": "১১টি সূরা · ৬৭ থেকে ৭৭",
+        "en": "11 surahs · 67 to 77"
+      },
+      "note": {
+        "bn": "কুরআনের ২৯ নম্বর পারা।",
+        "en": "The 29th juz of the Quran."
+      }
+    },
+    {
+      "id": "short-ten",
+      "category": "series",
+      "icon": "book",
+      "surahs": [105, 106, 107, 108, 109, 110, 111, 112, 113, 114],
+      "title": {
+        "bn": "ছোট ১০ সূরা",
+        "en": "Ten short surahs"
+      },
+      "subtitle": {
+        "bn": "১০৫ থেকে ১১৪",
+        "en": "105 to 114"
+      },
+      "note": {
+        "bn": "নতুন করে হিফজ শুরু করার জন্য।",
+        "en": "A starting point for memorisation."
+      }
+    },
+    {
+      "id": "musabbihat",
+      "category": "series",
+      "icon": "book",
+      "surahs": [17, 57, 59, 61, 62, 64, 87],
+      "title": {
+        "bn": "মুসাব্বিহাত",
+        "en": "Al-Musabbihat"
+      },
+      "subtitle": {
+        "bn": "৭টি সূরা",
+        "en": "7 surahs"
+      },
+      "note": {
+        "bn": "যে সূরাগুলো আল্লাহর তাসবিহ দিয়ে শুরু হয়েছে।",
+        "en": "The surahs that open with the glorification of Allah."
+      }
+    },
+    {
+      "id": "hawamim",
+      "category": "series",
+      "icon": "book",
+      "surahs": [40, 41, 42, 43, 44, 45, 46],
+      "title": {
+        "bn": "হা-মীম সিরিজ",
+        "en": "The Ha-Mim surahs"
+      },
+      "subtitle": {
+        "bn": "৭টি সূরা · ৪০ থেকে ৪৬",
+        "en": "7 surahs · 40 to 46"
+      },
+      "note": {
+        "bn": "হা-মীম দিয়ে শুরু হওয়া পরপর সাতটি সূরা।",
+        "en": "Seven consecutive surahs that begin with Ha-Mim."
+      }
+    }
+  ]
+}
