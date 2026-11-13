@@ -14,6 +14,7 @@
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+import { bd } from '../../app/src/config/countries/bd.ts';
 import {
   checkGeminiModel,
   DEFAULT_GEMINI_MODEL,
@@ -119,8 +120,21 @@ async function main() {
         : `::error title=Gemini model ${model} is not usable::${gemini.problem ?? gemini.state}${gemini.available.length ? `. Available: ${gemini.available.join(', ')}` : ''}`,
   );
 
+  // Test only (cli.test.ts): official anchors up to this month, so the end-to-end tests do not
+  // change when the app adds anchors. Never set in the workflow.
+  const anchorsUntil = process.env.MOON_SIGHTING_TEST_ANCHORS_UNTIL;
+  const hijriConfig = anchorsUntil
+    ? {
+        ...bd.hijri,
+        anchors: Object.fromEntries(
+          Object.entries(bd.hijri.anchors).filter(([key]) => key <= anchorsUntil),
+        ),
+      }
+    : undefined;
+
   const result = await runCheck({
     nowMs,
+    hijriConfig,
     remoteJson,
     sources,
     fetchText: async (url) => (await browserFetch(url)).text(),
