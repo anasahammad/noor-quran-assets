@@ -359,7 +359,23 @@ async function browserFetch(url: string): Promise<Response> {
   return response;
 }
 
+// NODE_EXTRA_CA_CERTS is read once at startup and a missing file only prints a warning, so say
+// plainly whether the intermediate certificate is there.
+export function extraCaStatus(path: string | undefined): string {
+  if (!path) return 'NODE_EXTRA_CA_CERTS is not set (the IFB site will fail TLS verification)';
+  try {
+    const pem = readFileSync(path, 'utf8');
+    const count = pem.match(/-----BEGIN CERTIFICATE-----/g)?.length ?? 0;
+    return count > 0
+      ? `NODE_EXTRA_CA_CERTS: ${path} (${count} certificate${count === 1 ? '' : 's'})`
+      : `NODE_EXTRA_CA_CERTS: ${path} has no certificate`;
+  } catch (error) {
+    return `NODE_EXTRA_CA_CERTS: ${path} cannot be read (${(error as Error).message})`;
+  }
+}
+
 async function main() {
+  console.log(extraCaStatus(process.env.NODE_EXTRA_CA_CERTS));
   const args = process.argv.slice(2);
   const remotePath = resolve(argValue(args, '--remote') ?? 'config/remote.json');
   const sourcesPath = resolve(

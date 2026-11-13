@@ -92,15 +92,92 @@ export function rssMoonItems(xml: string, utcOffsetMinutes: number, limit = 3): 
   return items;
 }
 
-// "blocked (HTTP 403)", "HTTP 404", "timeout" or the error message, for the log.
-export function failureOf(error: unknown): string {
-  if (error instanceof HttpError) {
-    return [401, 403, 429, 503].includes(error.status)
-      ? `blocked (HTTP ${error.status})`
-      : `HTTP ${error.status}`;
+// Node's fetch only says "fetch failed"; the reason is in `cause` (sometimes nested, e.g.
+// AggregateError or undici's ConnectTimeoutError). Codes and messages of the whole chain.
+export function causeChain(error: unknown): { code: string | null; message: string }[] {
+  const chain: { code: string | null; message: string }[] = [];
+  let current: unknown = (error as { cause?: unknown } | null)?.cause;
+  for (let depth = 0; current && depth < 5; depth++) {
+    const { code, message, errors } = current as {
+      code?: unknown;
+      message?: unknown;
+      errors?: unknown;
+    };
+    chain.push({
+      code: typeof code === 'string' ? code : null,
+      message: typeof message === 'string' ? message : String(current),
+    });
+    current =
+      (current as { cause?: unknown }).cause ?? (Array.isArray(errors) ? errors[0] : undefined);
   }
-  const { name, message } = error as Error;
-  return name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : `error (${message})`;
+  return chain;
+}
+
+const TLS_CODES = new Set([
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'CERT_HAS_EXPIRED',
+  'CERT_NOT_YET_VALID',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'CERT_UNTRUSTED',
+]);
+const DNS_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN']);
+// What blocking a foreign IP (the GitHub runner) usually looks like: the connection is dropped,
+// refused or never answered.
+const NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+]);
+
+export type FailureKind = 'blocked' | 'http' | 'timeout' | 'tls' | 'dns' | 'network' | 'other';
+
+export function failureKind(error: unknown): FailureKind {
+  if (error instanceof HttpError) {
+    return [401, 403, 429, 451, 503].includes(error.status) ? 'blocked' : 'http';
+  }
+  const { name } = error as Error;
+  if (name === 'TimeoutError' || name === 'AbortError') return 'timeout';
+  const codes = causeChain(error).map((c) => c.code);
+  if (codes.some((c) => c !== null && (TLS_CODES.has(c) || c.startsWith('ERR_TLS')))) return 'tls';
+  if (codes.some((c) => c !== null && DNS_CODES.has(c))) return 'dns';
+  if (codes.some((c) => c !== null && NETWORK_CODES.has(c))) return 'network';
+  return 'other';
+}
+
+const HINTS: Partial<Record<FailureKind, string>> = {
+  tls: 'certificate chain problem: the site does not send a certificate Node needs; add it to certs/ and NODE_EXTRA_CA_CERTS (never turn verification off)',
+  dns: 'DNS lookup failed',
+  network:
+    'connection dropped/refused/timed out: most likely the site blocks the runner (foreign IP); not fixable here, the news sources must cover it',
+};
+
+// "blocked (HTTP 403)", "HTTP 404", "timeout", or the error with its cause chain and a hint,
+// for the log and the issue, e.g.
+//   "fetch failed; cause: UNABLE_TO_VERIFY_LEAF_SIGNATURE: unable to verify the first certificate
+//    [certificate chain problem: …]"
+export function failureOf(error: unknown): string {
+  const kind = failureKind(error);
+  if (error instanceof HttpError) {
+    return kind === 'blocked' ? `blocked (HTTP ${error.status})` : `HTTP ${error.status}`;
+  }
+  if (kind === 'timeout') return 'timeout';
+  const { message } = error as Error;
+  const causes = causeChain(error)
+    .map((c) => (c.code ? `${c.code}: ${c.message}` : c.message))
+    .join(' <- ');
+  const hint = HINTS[kind];
+  return `error (${message}${causes ? `; cause: ${causes}` : ''})${hint ? ` [${hint}]` : ''}`;
 }
 
 export async function readNewspapers(input: {
