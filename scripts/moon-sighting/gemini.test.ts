@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 
-import { issueText, type CheckResult } from './check.ts';
+import { issuesFor, type RunResult } from './run.ts';
 import { checkGeminiModel, geminiAsker, geminiOff, geminiProblem } from './gemini.ts';
 import { expect } from './testing.ts';
 
@@ -97,11 +97,12 @@ describe('Gemini errors while asking', () => {
   });
 });
 
-describe('issue text with a Gemini problem', () => {
-  const quiet: CheckResult = {
-    outcome: { action: 'none', reason: 'IFB notice matches the calculation' },
-    decisions: [],
-    eveningKey: '2026-11-10',
+describe('issues with a Gemini problem', () => {
+  const quiet: RunResult = {
+    nowMs: Date.parse('2026-11-20T15:30:00Z'),
+    todayKey: '2026-11-20',
+    months: [],
+    commits: [],
     nextRemote: null,
   };
   const missing = {
@@ -111,13 +112,15 @@ describe('issue text with a Gemini problem', () => {
     available: ['gemini-3-flash'],
   };
 
-  it('opens its own issue when the run has none', () => {
-    const issue = issueText(quiet, missing);
-    expect(issue?.title).toBe('Moon sighting: Gemini model "gemini-2.5-flash" is not usable');
-    expect(issue?.body).toContain('`gemini-3-flash`');
+  it('opens its own issue (once) when the run has none', () => {
+    const issues = issuesFor(quiet, missing);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.title).toBe('Moon sighting: Gemini model "gemini-2.5-flash" is not usable');
+    expect(issues[0]?.mode).toBe('once');
+    expect(issues[0]?.body).toContain('`gemini-3-flash`');
   });
 
   it('nothing to report without a problem', () => {
-    expect(issueText(quiet, geminiOff('gemini-flash-latest'))).toBeNull();
+    expect(issuesFor(quiet, geminiOff('gemini-flash-latest'))).toEqual([]);
   });
 });
