@@ -37,7 +37,7 @@ import {
   type Source,
   type SourceStatus,
 } from './newspapers.ts';
-import { withMonthStart } from './remote.ts';
+import { nextRemoteJson } from './remote.ts';
 
 // The last scheduled run of a sighting evening (23:30 Dhaka): an evening without a confident
 // decision by then gets an issue.
@@ -265,27 +265,11 @@ export async function runCheck(deps: RunDeps): Promise<RunResult> {
   }
   if (months.length === 0) log('Nothing to check: no sighting evening is due.');
 
-  let nextRemote: Record<string, unknown> | null = null;
-  for (const commit of commits) {
-    nextRemote = withMonthStart(
-      nextRemote ?? deps.remoteJson,
-      config.remoteKey,
-      commit.monthKey,
-      commit.startDate,
-    );
-  }
-  if (nextRemote) {
-    // Validate: it must parse back with every new start, and nothing else may change.
-    const parsed = parseRemoteConfig(nextRemote, config.remoteKey);
-    const { monthStarts: _before, ...restBefore } = deps.remoteJson;
-    const { monthStarts: _after, ...restAfter } = nextRemote;
-    if (
-      commits.some((c) => parsed.monthStarts[c.monthKey] !== c.startDate) ||
-      JSON.stringify(restBefore) !== JSON.stringify(restAfter)
-    ) {
-      throw new Error('refusing to write: the new remote.json does not validate');
-    }
-  }
+  // Schema 2, the new starts added, every existing value kept (nextRemoteJson throws otherwise).
+  const nextRemote =
+    commits.length === 0
+      ? null
+      : nextRemoteJson(deps.remoteJson, commits, { country: config.remoteKey, config, today });
   return { nowMs: deps.nowMs, todayKey: keyOfDay(today), months, commits, nextRemote };
 }
 

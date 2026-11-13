@@ -106,6 +106,19 @@ describe('the 10 Nov 2026 evening (1448-06)', () => {
     ]);
   });
 
+  it('a schema 1 remote.json is written back as schema 2', async () => {
+    const { result } = await run(
+      '2026-11-10T21:30:00+06:00',
+      notices([noticeRowHtml(NOT_SEEN_TITLE, '১০-১১-২০২৬', PDF)]),
+      { remoteJson: { schema: 1, hijriOffset: { BD: 0 } } },
+    );
+    expect(result.nextRemote).toMatchObject({
+      schema: 2,
+      monthStarts: { BD: { '1448-06': '2026-11-12' } },
+    });
+    expect(Object.keys(result.nextRemote ?? {})).toEqual(['schema', 'hijriOffset', 'monthStarts']);
+  });
+
   it('IFB unreachable (its error cause is reported): the news path finds 2026-11-12', async () => {
     const { result } = await run(
       '2026-11-10T21:30:00+06:00',
