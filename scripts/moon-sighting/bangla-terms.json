@@ -1,0 +1,64 @@
+{
+  "_about": [
+    "Every Bangla spelling the moon-sighting check recognises, in one place (read by bangla.ts).",
+    "Each entry is a regular expression (JavaScript, no flags). Text and patterns are both folded",
+    "before matching (bangla.ts fold): Unicode NFC (so য় ড় ঢ় compare equal however they were typed),",
+    "zero-width joiners dropped, চন্দ্রবিন্দু (ঁ) dropped, ী→ি and ূ→ু, Bangla digits → 0-9, and in the",
+    "text apostrophes are removed and hyphens become spaces. So write চাঁদ or চাদ, সানী or সানি: same.",
+    "Add a variant here when a site spells something new; bangla.test.ts checks each one."
+  ],
+  "hijriMonths": {
+    "1": ["মু?হা?ররা?ম", "মহরম"],
+    "2": ["সফর", "ছফর"],
+    "3": ["রবি\\s*উল\\s*আ[উও]য়াল"],
+    "4": ["রবি\\s*উ[সল]\\s*(?:সানি|ছানি|আখি?রা?হ?|আখের)"],
+    "5": ["জ[ুো]?মাদ(?:ি\\s*উ[লস]|াল|া\\s*আল|িল)\\s*(?:আ[উও]য়াল|উলা)"],
+    "6": ["জ[ুো]?মাদ(?:ি\\s*উ[লস]|াল|া\\s*আল|িল)\\s*(?:আখি?রা?হ?|আখের|উখরা|সানি|ছানি)"],
+    "7": ["রজব"],
+    "8": ["শা\\s*বান"],
+    "9": ["রা?ম[জয]ান", "রা?মাদান"],
+    "10": ["শা[ওউ]য়াল"],
+    "11": ["(?:জ্বি|জি|যি|জু)ল\\s*(?:ক্ব|ক)া?দা?হ?"],
+    "12": ["(?:জ্বি|জি|যি|জু)ল\\s*হ[াি]?জ(?:্জ)?া?"]
+  },
+  "committee": ["চাঁদ\\s*দেখা\\s*(?:সংক্রান্ত\\s*)?(?:জাতীয়\\s*)?কমিটি"],
+  "seen": [
+    "চাঁদ\\s*দেখা\\s*(?:গেছে|গিয়েছে|গেল(?![েো])|মিলেছে|দিয়েছে)",
+    "চাঁদ\\s*উঠেছে"
+  ],
+  "notSeen": [
+    "চাঁদ\\s*দেখা\\s*(?:যায়\\s*নি|মেলেনি|মিলেনি|যায়নি)",
+    "চাঁদ\\s*দেখা\\s*না\\s*যাওয়ায়",
+    "চাঁদ\\s*ওঠেনি",
+    "(?:30|ত্রিশ)\\s*দিন\\s*পূর্ণ"
+  ],
+  "_foreignNote": "A decision for another country (Saudi Arabia sees the crescent a day earlier) unless the text also names Bangladesh.",
+  "foreign": ["সৌদি", "মধ্যপ্রাচ্য", "আমিরাত", "পাকিস্তান", "ভারতে", "মালয়েশিয়া", "ইন্দোনেশিয়া"],
+  "bangladesh": ["বাংলাদেশ", "দেশের\\s*আকাশে", "ইসলামিক\\s*ফাউন্ডেশন", "বায়তুল\\s*মোকাররম"],
+  "monthStart": ["শুরু", "গণনা"],
+  "hijriYear": ["(\\d{4})\\s*(?:হিজরি|হি\\.)"],
+  "tomorrow": ["আগামীকাল", "আগামী\\s*কাল"],
+  "weekdays": {
+    "0": ["রবিবার", "রোববার"],
+    "1": ["সোমবার"],
+    "2": ["মঙ্গলবার"],
+    "3": ["বুধবার"],
+    "4": ["বৃহস্পতিবার", "বিষ্যুদবার"],
+    "5": ["শুক্রবার"],
+    "6": ["শনিবার"]
+  },
+  "gregorianMonths": {
+    "1": ["জানুয়ারি"],
+    "2": ["ফেব্রুয়ারি"],
+    "3": ["মার্চ"],
+    "4": ["এপ্রিল"],
+    "5": ["মে"],
+    "6": ["জুন"],
+    "7": ["জুলাই"],
+    "8": ["আগস্ট", "আগষ্ট"],
+    "9": ["সেপ্টেম্বর"],
+    "10": ["অক্টোবর"],
+    "11": ["নভেম্বর"],
+    "12": ["ডিসেম্বর"]
+  }
+}

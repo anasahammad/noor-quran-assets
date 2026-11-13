@@ -60,6 +60,8 @@ describe('IFB notices page', () => {
       startDate: '2026-10-13',
       source: PDF,
       sameEvening: true,
+      publisher: 'islamicfoundation.gov.bd',
+      basis: 'notice',
     });
   });
 
@@ -97,15 +99,23 @@ describe('newspapers', () => {
   const RSS = `<rss><channel><title>Feed</title>
     <item><title><![CDATA[জমাদিউল আউয়াল মাসের চাঁদ দেখা যায়নি]]></title><link>https://www.jagonews24.com/religion/1</link><pubDate>Sun, 11 Oct 2026 14:10:00 GMT</pubDate><description><![CDATA[আজ বাংলাদেশের আকাশে ১৪৪৮ হিজরি সনের জমাদিউল আউয়াল মাসের চাঁদ দেখা যায়নি।]]></description></item>
     <item><title>খেলার খবর</title><link>https://www.jagonews24.com/sports/2</link></item>
+    <item><title>চাঁদাবাজ গ্রেফতার</title><link>https://www.jagonews24.com/crime/3</link></item>
   </channel></rss>`;
+  const OCT_EVENING = {
+    eveningKey: '2026-10-11',
+    expected: { year: 1448, month: 5 },
+    utcOffsetMinutes: 360,
+    nowMs: Date.parse('2026-10-11T23:35:00+06:00'),
+  };
 
-  it('finds moon items in an RSS feed, with title and lead as a summary', () => {
-    expect(rssMoonItems(RSS, 360)).toEqual([
+  it('finds moon items (not চাঁদা) in an RSS feed, with title and lead as a summary', () => {
+    expect(rssMoonItems(RSS)).toEqual([
       {
         url: 'https://www.jagonews24.com/religion/1',
         summary: {
           text: 'জমাদিউল আউয়াল মাসের চাঁদ দেখা যায়নি। আজ বাংলাদেশের আকাশে ১৪৪৮ হিজরি সনের জমাদিউল আউয়াল মাসের চাঁদ দেখা যায়নি।',
-          publishedKey: '2026-10-11',
+          publishedMs: Date.parse('2026-10-11T14:10:00Z'),
+          publisher: undefined,
         },
       },
     ]);
@@ -119,6 +129,7 @@ describe('newspapers', () => {
 
   it('logs one status per source and reads a blocked RSS article from its summary', async () => {
     const lines: string[] = [];
+    const status: { name: string; status: string }[] = [];
     const pages: Record<string, string> = {
       'https://www.jagonews24.com/rss/rss.xml': RSS,
       'https://www.dhakapost.com/religion': '<a href="/x">খেলা</a>',
@@ -135,22 +146,25 @@ describe('newspapers', () => {
         if (page === undefined) throw new HttpError(403);
         return page;
       },
-      eveningKey: '2026-10-11',
-      utcOffsetMinutes: 360,
+      evening: OCT_EVENING,
       log: (line) => lines.push(line),
+      status,
     });
     expect(lines.slice(0, 4)).toEqual([
       'Source BSS: blocked (HTTP 403)',
       'Source Dhaka Post: OK, no article about the moon',
-      'Source Jago News: OK, 1 moon article, 1 with a decision',
+      'Source Jago News: OK, 1 moon item, 1 with a decision (jagonews24.com)',
       "  https://www.jagonews24.com/religion/1: blocked (HTTP 403), read the feed's summary instead",
     ]);
+    expect(status.map((s) => s.name)).toEqual(['BSS', 'Dhaka Post', 'Jago News']);
     expect(decisions).toEqual([
       expect.objectContaining({
         seen: false,
         month: 5,
         startDate: '2026-10-13',
         sameEvening: true,
+        publisher: 'jagonews24.com',
+        basis: 'inferred',
       }),
     ]);
   });

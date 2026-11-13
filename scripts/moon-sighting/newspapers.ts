@@ -1,10 +1,27 @@
-// The newspaper fallback: reads the configured sources (HTML list pages, RSS feeds, or single
-// articles) and logs one status line per source, so the run log shows which sites answered.
+// The news sources: reads the configured sources (HTML list pages, RSS feeds, or single
+// articles) and logs one status line per source, so the run log (and the issue) shows which
+// sites answered. Only the decision date is read from them; no article text is kept.
 
-import { keyOfDay } from '../../app/src/lib/hijri/calendar.ts';
-import { extractDecision, type Decision } from './decision.ts';
+import { fold } from './bangla.ts';
+import {
+  domainOf,
+  implausibility,
+  readDecision,
+  type Decision,
+  type Evening,
+  type Reading,
+} from './decision.ts';
 
-export type Source = { name: string; url: string; kind: 'list' | 'rss' | 'article' };
+export type Source = {
+  name: string;
+  url: string;
+  kind: 'list' | 'rss' | 'article';
+  // false: use only the feed item (title + summary), never fetch the article page. For
+  // aggregators (Google News links are redirects), whose items name their publisher.
+  articles?: boolean;
+  // Most items/links read per source (default 5; feeds whose items are not fetched: 40).
+  limit?: number;
+};
 
 // A failed HTTP response; `status` tells a blocked site (403/429/503) from a broken URL.
 export class HttpError extends Error {
@@ -37,35 +54,55 @@ export function htmlText(html: string): string {
     .trim();
 }
 
-// The publication day of an article (Dhaka), from its metadata, if any.
-export function publishedKey(html: string, utcOffsetMinutes: number): string | null {
+// When an article was published (ms), from its metadata, if any.
+export function publishedMs(html: string): number | null {
   const match =
     /article:published_time"\s+content="([^"]+)"/i.exec(html) ??
     /content="([^"]+)"\s+property="article:published_time"/i.exec(html) ??
+    /"datePublished"\s*:\s*"([^"]+)"/i.exec(html) ??
     /<time[^>]+datetime="([^"]+)"/i.exec(html);
   const ms = match?.[1] ? Date.parse(match[1]) : NaN;
-  if (Number.isNaN(ms)) return null;
-  return keyOfDay(Math.floor((ms + utcOffsetMinutes * 60_000) / 86_400_000));
+  return Number.isNaN(ms) ? null : ms;
 }
 
-// Article links from a list page whose link text mentions the moon ("চাঁদ").
-export function moonLinks(html: string, baseUrl: string, limit = 3): string[] {
-  const links: string[] = [];
+// The moon ("চাঁদ"), not "চাঁদা" (extortion, a frequent headline word).
+export const mentionsMoon = (text: string) => /চাদ(?!া)/.test(fold(text));
+
+// An article to read. `summary`: what the feed or list page already says (title, lead,
+// publication time, publisher), used alone when the article page is not fetched or blocked.
+export type Article = {
+  url: string;
+  summary?: { text: string; publishedMs: number | null; publisher?: string };
+};
+
+// Article links from a list page whose link text mentions the moon, with the link text as a
+// headline-only summary.
+export function moonLinks(html: string, baseUrl: string, limit = 5): Article[] {
+  const links: Article[] = [];
   for (const match of html.matchAll(/<a\s[^>]*href="([^"#]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
     const [, href = '', inner = ''] = match;
-    if (!/চাঁদ/.test(htmlText(inner))) continue;
+    const text = htmlText(inner);
+    if (!mentionsMoon(text)) continue;
     const url = new URL(href, baseUrl).toString();
-    if (!links.includes(url)) links.push(url);
+    if (links.some((a) => a.url === url)) continue;
+    links.push({ url, summary: { text, publishedMs: null } });
     if (links.length >= limit) break;
   }
   return links;
 }
 
-// An article to read; `summary` (from an RSS item) is used when the article page is blocked.
-type Article = { url: string; summary?: { text: string; publishedKey: string | null } };
+const decodeXml = (text: string) =>
+  text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&');
 
-// Items of an RSS feed whose title mentions the moon, with their title + lead as a summary.
-export function rssMoonItems(xml: string, utcOffsetMinutes: number, limit = 3): Article[] {
+// Items of an RSS feed whose title mentions the moon, with title + lead as a summary. An item
+// with <source url="…"> (Google News) is attributed to that publisher, and its " - Publisher"
+// title suffix is dropped.
+export function rssMoonItems(xml: string, limit = 5): Article[] {
   const field = (item: string, tag: string) =>
     (new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'i').exec(item)?.[1] ?? '')
       .replace(/^\s*<!\[CDATA\[/, '')
@@ -73,18 +110,25 @@ export function rssMoonItems(xml: string, utcOffsetMinutes: number, limit = 3): 
       .trim();
   const items: Article[] = [];
   for (const [, item = ''] of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
-    const title = field(item, 'title');
-    const link = field(item, 'link');
-    if (!/চাঁদ/.test(title) || !/^https?:\/\//.test(link)) continue;
+    let title = decodeXml(field(item, 'title'));
+    const link = decodeXml(field(item, 'link'));
+    if (!mentionsMoon(title) || !/^https?:\/\//.test(link)) continue;
     if (items.some((a) => a.url === link)) continue;
-    const ms = Date.parse(field(item, 'pubDate'));
+    const sourceTag = /<source\b[^>]*url="([^"]+)"[^>]*>([\s\S]*?)<\/source>/i.exec(item);
+    const publisher = sourceTag?.[1] ? domainOf(decodeXml(sourceTag[1])) : undefined;
+    const publisherName = sourceTag?.[2] ? decodeXml(sourceTag[2]).trim() : '';
+    if (publisherName && title.endsWith(` - ${publisherName}`)) {
+      title = title.slice(0, -` - ${publisherName}`.length);
+    }
+    // Google News descriptions only repeat the title as a link; skip them then.
+    const description = publisher ? '' : htmlText(decodeXml(field(item, 'description')));
+    const ms = Date.parse(field(item, 'pubDate') || field(item, 'dc:date'));
     items.push({
       url: link,
       summary: {
-        text: htmlText(`${title}। ${field(item, 'description')}`),
-        publishedKey: Number.isNaN(ms)
-          ? null
-          : keyOfDay(Math.floor((ms + utcOffsetMinutes * 60_000) / 86_400_000)),
+        text: description ? `${htmlText(title)}। ${description}` : htmlText(title),
+        publishedMs: Number.isNaN(ms) ? null : ms,
+        publisher,
       },
     });
     if (items.length >= limit) break;
@@ -180,70 +224,105 @@ export function failureOf(error: unknown): string {
   return `error (${message}${causes ? `; cause: ${causes}` : ''})${hint ? ` [${hint}]` : ''}`;
 }
 
+// Readings that the Bangla patterns could not settle, worth asking Gemini about.
+const UNSETTLED = new Set(['names no Hijri month', 'says both seen and not seen']);
+
+export type SourceStatus = { name: string; status: string };
+
 export async function readNewspapers(input: {
   sources: readonly Source[];
   fetchText: Fetcher;
   askGemini?: GeminiAsker;
-  eveningKey: string;
-  utcOffsetMinutes: number;
+  evening: Evening;
   log: (line: string) => void;
+  // One line per source for the issue.
+  status?: SourceStatus[];
 }): Promise<Decision[]> {
-  const { eveningKey, log } = input;
+  const { evening, log } = input;
   const decisions: Decision[] = [];
+  const report = (source: Source, status: string) => {
+    log(`Source ${source.name}: ${status}`);
+    input.status?.push({ name: source.name, status });
+  };
   for (const source of input.sources) {
+    const fetchArticles = source.articles !== false;
+    const limit = source.limit ?? (fetchArticles ? 5 : 40);
     let articles: Article[];
     try {
       if (source.kind === 'article') articles = [{ url: source.url }];
       else {
         const page = await input.fetchText(source.url);
         articles =
-          source.kind === 'rss'
-            ? rssMoonItems(page, input.utcOffsetMinutes)
-            : moonLinks(page, source.url).map((url) => ({ url }));
+          source.kind === 'rss' ? rssMoonItems(page, limit) : moonLinks(page, source.url, limit);
       }
     } catch (error) {
-      log(`Source ${source.name}: ${failureOf(error)}`);
+      report(source, failureOf(error));
       continue;
     }
     if (articles.length === 0) {
-      log(`Source ${source.name}: OK, no article about the moon`);
+      report(source, 'OK, no article about the moon');
       continue;
     }
     const found: Decision[] = [];
-    const failures: string[] = [];
+    const notes: string[] = [];
     for (const { url, summary } of articles) {
       let text: string;
-      let published: string | null;
-      try {
-        const html = await input.fetchText(url);
-        text = htmlText(html);
-        published = publishedKey(html, input.utcOffsetMinutes);
-      } catch (error) {
-        if (!summary) {
-          failures.push(`${url}: ${failureOf(error)}`);
-          continue;
+      let published: number | null;
+      let fromPage = false;
+      if (!fetchArticles && summary) {
+        ({ text, publishedMs: published } = summary);
+      } else {
+        try {
+          const html = await input.fetchText(url);
+          text = htmlText(html);
+          published = publishedMs(html) ?? summary?.publishedMs ?? null;
+          fromPage = true;
+        } catch (error) {
+          if (!summary) {
+            notes.push(`${url}: ${failureOf(error)}`);
+            continue;
+          }
+          notes.push(`${url}: ${failureOf(error)}, read the ${source.kind === 'rss' ? "feed's summary" : 'headline'} instead`);
+          ({ text, publishedMs: published } = summary);
         }
-        failures.push(`${url}: ${failureOf(error)}, read the feed's summary instead`);
-        ({ text, publishedKey: published } = summary);
       }
-      try {
-        let decision = extractDecision(text, url, eveningKey, published);
-        if (!decision && input.askGemini && /চাঁদ/.test(text)) {
-          decision = await input.askGemini(text, eveningKey, url);
+      const publisher = summary?.publisher;
+      let reading: Reading = readDecision(text, url, evening, published, publisher);
+      const unsettled =
+        reading.kind === 'none' || (reading.kind === 'ignored' && UNSETTLED.has(reading.reason));
+      if (unsettled && fromPage && input.askGemini && mentionsMoon(text)) {
+        try {
+          const answer = await input.askGemini(text, evening.eveningKey, url);
+          if (answer) {
+            const decision = { ...answer, publisher: publisher ?? domainOf(url), basis: 'gemini' as const };
+            const problem =
+              published !== null && published > evening.nowMs
+                ? 'published after the time of this run'
+                : implausibility(decision, evening);
+            reading = problem
+              ? { kind: 'ignored', reason: `Gemini: ${problem}` }
+              : { kind: 'decision', decision };
+          }
+        } catch (error) {
+          notes.push(`${url}: ${failureOf(error)}`);
         }
-        if (decision) found.push(decision);
-      } catch (error) {
-        failures.push(`${url}: ${failureOf(error)}`);
       }
+      const label = summary?.text && !fromPage ? `"${summary.text.slice(0, 90)}"` : url;
+      if (reading.kind === 'decision') found.push(reading.decision);
+      else if (reading.kind === 'ignored') notes.push(`${label}: ignored, ${reading.reason}`);
     }
-    const summary = `${articles.length} moon article${articles.length === 1 ? '' : 's'}`;
-    log(
+    const count = `${articles.length} moon item${articles.length === 1 ? '' : 's'}`;
+    const publishers = new Set(found.map((d) => d.publisher ?? domainOf(d.source)));
+    report(
+      source,
       found.length > 0
-        ? `Source ${source.name}: OK, ${summary}, ${found.length} with a decision`
-        : `Source ${source.name}: OK, ${summary}, no decision in them`,
+        ? `OK, ${count}, ${found.length} with a decision (${[...publishers].join(', ')})`
+        : `OK, ${count}, no decision for this evening in them`,
     );
-    for (const failure of failures) log(`  ${failure}`);
-    for (const decision of found) log(`  ${JSON.stringify(decision)}`);
+    for (const note of notes) log(`  ${note}`);
+    for (const decision of found) {
+      log(`  ${decision.publisher}: ${decision.seen ? 'seen' : 'not seen'}, starts ${decision.startDate} (${decision.basis}) ${decision.source}`);
+    }
     decisions.push(...found);
   }
   return decisions;

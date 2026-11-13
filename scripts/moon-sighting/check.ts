@@ -23,13 +23,8 @@ import { resolve } from 'node:path';
 import { bd } from '../../app/src/config/countries/bd.ts';
 import { createHijriCalendar, keyOfDay, monthKey } from '../../app/src/lib/hijri/calendar.ts';
 import { isValidDateKey, parseRemoteConfig } from '../../app/src/lib/hijri/remoteSchema.ts';
-import {
-  decide,
-  decideFromNotice,
-  withMonthStart,
-  type Decision,
-  type Outcome,
-} from './decision.ts';
+import { decide, decideFromNotice, type Decision, type Outcome } from './decision.ts';
+import { withMonthStart } from './remote.ts';
 import {
   checkGeminiModel,
   DEFAULT_GEMINI_MODEL,
@@ -53,7 +48,7 @@ const NEWSPAPER_FALLBACK_MINUTES = 23 * 60 + 30;
 // A normal browser, so news sites serve the page they serve to readers.
 const BROWSER_HEADERS = {
   'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'bn-BD,bn;q=0.9,en;q=0.8',
 };
@@ -164,6 +159,7 @@ export async function runCheck(deps: CheckDeps): Promise<CheckResult> {
     fetchBytes: deps.fetchBytes,
     eveningKey,
     expected,
+    todayKey: keyOfDay(today),
     log,
   });
   // Always read, so every run log shows which newspapers answer.
@@ -171,24 +167,29 @@ export async function runCheck(deps: CheckDeps): Promise<CheckResult> {
     sources: deps.sources,
     fetchText: deps.fetchText,
     askGemini: deps.askGemini,
-    eveningKey,
-    utcOffsetMinutes: config.observer.utcOffsetMinutes,
+    evening: {
+      eveningKey,
+      expected,
+      utcOffsetMinutes: config.observer.utcOffsetMinutes,
+      nowMs: deps.nowMs,
+    },
     log,
   });
   const decisions = notice ? [notice.decision, ...newspapers] : newspapers;
   const minutesSinceEvening = (deps.nowMs + offsetMs - evening * 86_400_000) / 60_000;
 
+  const unlessCalculated = (o: Outcome): Outcome =>
+    o.action === 'commit' && o.startDate === calculatedStart
+      ? { action: 'none', reason: 'decision matches the calculation' }
+      : o;
   let outcome: Outcome;
   if (notice) {
-    outcome = decideFromNotice({
-      notice: notice.decision,
-      pdfStart: notice.pdfStart,
-      expected,
-      calculatedStart,
-    });
+    outcome = unlessCalculated(
+      decideFromNotice({ notice: notice.decision, pdfStart: notice.pdfStart, expected }),
+    );
   } else if (minutesSinceEvening >= NEWSPAPER_FALLBACK_MINUTES) {
     log('No IFB notice by 23:30: the newspapers decide (two independent sources must agree).');
-    outcome = decide({ decisions: newspapers, expected, calculatedStart });
+    outcome = unlessCalculated(decide({ decisions: newspapers, expected }));
   } else {
     outcome = {
       action: 'none',

@@ -5,14 +5,8 @@
 // with the signed notice as a PDF (so far scanned images, so usually the title is all we read).
 
 import { dayOfKey, keyOfDay } from '../../app/src/lib/hijri/calendar.ts';
-import {
-  explicitStartIn,
-  hijriMonthIn,
-  NOT_SEEN,
-  SEEN,
-  toAsciiDigits,
-  type Decision,
-} from './decision.ts';
+import { hijriMonthIn, namesCommittee, saysNotSeen, saysSeen, toAsciiDigits } from './bangla.ts';
+import { statedStartIn, type Decision } from './decision.ts';
 import { failureOf, type Fetcher } from './newspapers.ts';
 import { pdfText } from './pdf.ts';
 
@@ -56,13 +50,11 @@ export function parseNoticeRows(html: string, pageUrl: string): NoticeRow[] {
   return rows;
 }
 
-const COMMITTEE = /চাঁদ\s*দেখা\s*কমিটি/;
-
 // A committee decision row: names the committee, a Hijri month, and seen or not seen.
 export const isCommitteeNotice = (row: NoticeRow) =>
-  COMMITTEE.test(row.title) &&
+  namesCommittee(row.title) &&
   hijriMonthIn(row.title) !== null &&
-  SEEN.test(row.title) !== NOT_SEEN.test(row.title);
+  saysSeen(row.title) !== saysNotSeen(row.title);
 
 // The decision of a committee notice for the sighting evening, or null when the notice is not
 // about that evening and month. The notice may be dated the evening itself or the next day
@@ -79,7 +71,7 @@ export function noticeDecision(
   if (dated !== evening && dated !== evening + 1) return null;
   const month = hijriMonthIn(row.title);
   if (month !== expected.month) return null;
-  const seen = SEEN.test(row.title);
+  const seen = saysSeen(row.title);
   return {
     seen,
     month,
@@ -88,6 +80,8 @@ export function noticeDecision(
     startDate: keyOfDay(evening + (seen ? 1 : 2)),
     source: row.pdfUrl ?? row.detailUrl ?? IFB_NOTICES_URL,
     sameEvening: true,
+    publisher: 'islamicfoundation.gov.bd',
+    basis: 'notice',
   };
 }
 
@@ -104,9 +98,17 @@ export async function readIfbNotice(input: {
   fetchBytes?: (url: string) => Promise<Uint8Array>;
   eveningKey: string;
   expected: { year: number; month: number };
+  // Rows dated after this day are ignored (a --now run sees only what existed then).
+  todayKey?: string;
   log: (line: string) => void;
+  // Each page's status for the issue ("OK, 10 rows" or the error with its cause).
+  status?: string[];
 }): Promise<IfbNotice | null> {
   const { eveningKey, expected, log } = input;
+  const note = (line: string) => {
+    log(line);
+    input.status?.push(line);
+  };
   let latest: NoticeRow | null = null;
   for (let page = 1; page <= PAGES; page++) {
     const url = `${IFB_NOTICES_URL}?page=${page}`;
@@ -114,12 +116,13 @@ export async function readIfbNotice(input: {
     try {
       rows = parseNoticeRows(await input.fetchText(url), url);
     } catch (error) {
-      log(`IFB notices page ${page}: ${failureOf(error)}`);
+      note(`IFB notices page ${page}: ${failureOf(error)}`);
       continue;
     }
-    log(`IFB notices page ${page}: OK, ${rows.length} rows`);
+    note(`IFB notices page ${page}: OK, ${rows.length} rows`);
     for (const row of rows) {
       if (!isCommitteeNotice(row)) continue;
+      if (input.todayKey && row.dateKey > input.todayKey) continue;
       latest ??= row;
       const decision = noticeDecision(row, eveningKey, expected);
       if (!decision) continue;
@@ -128,7 +131,7 @@ export async function readIfbNotice(input: {
       return { row, decision, pdfStart: await statedStart(row, input) };
     }
   }
-  log(
+  note(
     latest
       ? `IFB: no notice for this evening yet; latest committee notice: "${latest.title}" dated ${latest.dateKey}, PDF ${latest.pdfUrl ?? '(none)'}`
       : `IFB: no committee notice on pages 1-${PAGES}`,
@@ -151,7 +154,7 @@ async function statedStart(
       input.log('  PDF: scanned image, start date not checked (the title decides)');
       return null;
     }
-    const start = explicitStartIn(pdf.text, input.eveningKey);
+    const start = statedStartIn(pdf.text, input.eveningKey);
     input.log(
       start
         ? `  PDF: text, states the month starts ${start}`

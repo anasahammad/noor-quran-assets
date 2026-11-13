@@ -1,8 +1,19 @@
-// Pure decision logic for the moon-sighting Action (scripts/moon-sighting/check.ts): reading a
-// committee decision out of Bangla news text, and deciding what to do with the decisions found.
-// No network, no file system: unit-tested (decision.test.ts).
+// Pure decision logic for the moon-sighting Action: reading a committee decision out of Bangla
+// news text, checking it is plausible for this evening, and deciding what to do with the
+// decisions found. No network, no file system.
 
 import { dayOfKey, keyOfDay } from '../../app/src/lib/hijri/calendar.ts';
+import {
+  hijriMonthsIn,
+  hijriYearsIn,
+  isForeign,
+  saysNotSeen,
+  saysSeen,
+  startCluesIn,
+  toAsciiDigits,
+} from './bangla.ts';
+
+export { toAsciiDigits };
 
 export type Decision = {
   // Crescent of `month` seen this evening (true) or not seen / 30 days completed (false).
@@ -11,117 +22,189 @@ export type Decision = {
   hijriYear: number | null;
   // First day of `month` ("YYYY-MM-DD").
   startDate: string;
+  // The article (or notice) URL.
   source: string;
-  // The text is about this evening's committee meeting (published today, or names today).
+  // The text is about this evening's committee meeting.
   sameEvening: boolean;
+  // The publisher, for counting independent sources (Google News items name it; otherwise the
+  // URL's host).
+  publisher?: string;
+  // How the start was found: a stated date/weekday, or inferred from seen / not seen.
+  basis?: 'stated' | 'inferred' | 'notice' | 'gemini';
 };
 
-const BANGLA_DIGITS = '০১২৩৪৫৬৭৮৯';
-export const toAsciiDigits = (text: string) =>
-  text.replace(/[০-৯]/g, (digit) => String(BANGLA_DIGITS.indexOf(digit)));
+// The sighting evening being decided: the 29th of the month before `expected`.
+export type Evening = {
+  eveningKey: string;
+  expected: { year: number; month: number };
+  utcOffsetMinutes: number;
+  // The run's time (or --now): anything published later is ignored, so a simulated run only
+  // sees what existed then.
+  nowMs: number;
+};
 
-// Bangla spellings used by the Islamic Foundation and the press.
-const HIJRI_MONTHS: readonly (readonly [number, RegExp])[] = [
-  [1, /মু?হা?র(?:্|)রা?ম|মহররম/],
-  [2, /সফর/],
-  [3, /রবিউল\s*আ(?:উ|ও)য়াল/],
-  [4, /রবিউস\s*সান[িী]|রবিউল\s*আখির/],
-  [5, /জ(?:ু|)মাদিউল\s*(?:আ(?:উ|ও)য়াল|উলা)|জুমাদাল\s*উলা/],
-  [6, /জ(?:ু|)মাদিউস\s*সান[িী]|জ(?:ু|)মাদিউল\s*আখির|জুমাদাল\s*আখির/],
-  [7, /রজব/],
-  [8, /শা[’'‘]?বান/],
-  [9, /রম[জয]ান/],
-  [10, /শাওয়াল|শাওয়াল/],
-  [11, /জিল\s*ক(?:্|)[দব]|জিলকদ|জিলক্বদ|জিলকাদ/],
-  [12, /জিল\s*হজ(?:্জ)?|জিলহজ/],
-];
+// The committee decides after maghrib: an article from earlier that day is a preview.
+const EARLIEST_DECISION_MINUTES = 17 * 60;
+// The two possible starts: the day after the 29th (seen) or after the 30th (not seen).
+export const possibleStarts = (eveningKey: string) => {
+  const evening = dayOfKey(eveningKey);
+  return [keyOfDay(evening + 1), keyOfDay(evening + 2)] as const;
+};
 
-const GREGORIAN_MONTHS: readonly (readonly [number, RegExp])[] = [
-  [1, /জানুয়ারি/],
-  [2, /ফেব্রুয়ারি/],
-  [3, /মার্চ/],
-  [4, /এপ্রিল/],
-  [5, /মে/],
-  [6, /জুন/],
-  [7, /জুলাই/],
-  [8, /আগস্ট/],
-  [9, /সেপ্টেম্বর/],
-  [10, /অক্টোবর/],
-  [11, /নভেম্বর/],
-  [12, /ডিসেম্বর/],
-];
+export type Reading =
+  | { kind: 'decision'; decision: Decision }
+  // About the moon but not usable, and why (logged per article).
+  | { kind: 'ignored'; reason: string }
+  // Nothing about a decision (a preview, a meeting announcement…).
+  | { kind: 'none' };
 
-export const SEEN = /চাঁদ\s*দেখা\s*(?:গেছে|গিয়েছে)/;
-export const NOT_SEEN = /চাঁদ\s*দেখা\s*যায়নি/;
-const THIRTY_DAYS = /৩০\s*দিন\s*পূর্ণ|30\s*দিন\s*পূর্ণ/;
+const localDayAndMinutes = (ms: number, utcOffsetMinutes: number) => {
+  const local = ms + utcOffsetMinutes * 60_000;
+  const day = Math.floor(local / 86_400_000);
+  return { day, minutes: (local - day * 86_400_000) / 60_000 };
+};
 
-export function hijriMonthIn(text: string): number | null {
-  // "<মাস> মাসের চাঁদ" first (the month being sighted), else "<মাস> মাস গণনা শুরু".
-  for (const pattern of [
-    /(\S+(?:\s+\S+)?)\s*মাসের\s*চাঁদ/,
-    /(\S+(?:\s+\S+)?)\s*মাস\s*গণনা\s*শুরু/,
-  ]) {
-    const match = pattern.exec(text);
-    if (!match?.[1]) continue;
-    const found = HIJRI_MONTHS.find(([, name]) => name.test(match[1] ?? ''));
-    if (found) return found[0];
-  }
-  return null;
-}
-
-function hijriYearIn(text: string): number | null {
-  const match = /(\d{4})\s*হিজরি/.exec(toAsciiDigits(text));
-  return match?.[1] ? Number(match[1]) : null;
-}
-
-// "(১৩ অক্টোবর) থেকে … গণনা শুরু" → that date in the evening's year (or the next one).
-export function explicitStartIn(text: string, eveningKey: string): string | null {
-  const ascii = toAsciiDigits(text);
-  const match = /(\d{1,2})\s*(\S+?)\)?\s*(?:থেকে|হতে)[^।]*গণনা\s*শুরু/.exec(ascii);
-  if (!match?.[1] || !match[2]) return null;
-  const month = GREGORIAN_MONTHS.find(([, name]) => name.test(match[2] ?? ''))?.[0];
-  if (!month) return null;
+// Resolves stated start clues against the evening: dates in the evening's year (or the next
+// one), weekdays to whichever of the two possible starts falls on that weekday.
+function statedStarts(text: string, eveningKey: string): string[] {
+  const clues = startCluesIn(text);
+  const evening = dayOfKey(eveningKey);
   const [year = 0, eveningMonth = 1] = eveningKey.split('-').map(Number);
-  const y = month < eveningMonth ? year + 1 : year;
-  return `${y}-${String(month).padStart(2, '0')}-${String(Number(match[1])).padStart(2, '0')}`;
+  const starts = new Set<string>();
+  for (const { day, month } of clues.dates) {
+    const y = month < eveningMonth ? year + 1 : year;
+    starts.add(`${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
+  for (const weekday of clues.weekdays) {
+    const match = [evening + 1, evening + 2].find((d) => new Date(d * 86_400_000).getUTCDay() === weekday);
+    // A weekday that is neither possible start: keep it visible as an implausible start.
+    starts.add(match === undefined ? `weekday ${weekday}` : keyOfDay(match));
+  }
+  if (clues.tomorrow) starts.add(keyOfDay(evening + 1));
+  return [...starts];
 }
 
-// Does the text name the evening's date ("১১ অক্টোবর") together with "আজ" or "সন্ধ্যায়"?
-function namesEvening(text: string, eveningKey: string): boolean {
-  const [, month = 1, day = 1] = eveningKey.split('-').map(Number);
-  const monthName = GREGORIAN_MONTHS.find(([m]) => m === month)?.[1];
-  if (!monthName) return false;
-  const ascii = toAsciiDigits(text);
-  const dated = new RegExp(`(^|\\D)${day}\\s*${monthName.source}`).test(ascii);
-  return dated && /আজ|সন্ধ্যা/.test(text);
+// The one start date a text states ("১৩ অক্টোবর থেকে … গণনা শুরু"), or null (none, or several).
+export function statedStartIn(text: string, eveningKey: string): string | null {
+  const starts = statedStarts(text, eveningKey).filter((s) => !s.startsWith('weekday'));
+  return starts.length === 1 ? (starts[0] ?? null) : null;
 }
 
-// One source's decision from its text, or null when the text does not settle it (then Gemini
-// may be asked). `publishedKey`: the article's publication day (from its metadata), if known.
-export function extractDecision(
+// One article's decision for this evening, or why it is not one. `publishedMs`: when the
+// article (or feed item) was published, if known.
+export function readDecision(
   text: string,
   source: string,
-  eveningKey: string,
-  publishedKey: string | null,
-): Decision | null {
-  const seen = SEEN.test(text);
-  const notSeen = NOT_SEEN.test(text) || THIRTY_DAYS.test(text);
-  if (seen === notSeen) return null;
-  const month = hijriMonthIn(text);
-  if (month === null) return null;
-  const evening = dayOfKey(eveningKey);
-  const startDate = keyOfDay(evening + (seen ? 1 : 2));
-  const explicit = explicitStartIn(text, eveningKey);
-  // A stated start that disagrees with the sighting is not a clear decision.
-  if (explicit !== null && explicit !== startDate) return null;
+  evening: Evening,
+  publishedMs: number | null,
+  publisher?: string,
+): Reading {
+  const { eveningKey, expected } = evening;
+  const seen = saysSeen(text);
+  const notSeen = saysNotSeen(text);
+  const stated = statedStarts(text, eveningKey);
+  if (!seen && !notSeen && stated.length === 0) return { kind: 'none' };
+  const months = hijriMonthsIn(text);
+  if (months.length === 0) {
+    return seen || notSeen ? { kind: 'ignored', reason: 'names no Hijri month' } : { kind: 'none' };
+  }
+  if (isForeign(text)) return { kind: 'ignored', reason: "another country's sighting" };
+  const previous = expected.month === 1 ? 12 : expected.month - 1;
+  // The month the decision is about: the expected one when named; the ending month with
+  // "30 days complete" also means the expected one is next.
+  let month: number;
+  if (months.includes(expected.month)) month = expected.month;
+  else if (months.length === 1 && months[0] === previous && notSeen) month = expected.month;
+  else {
+    return {
+      kind: 'ignored',
+      reason: `about month ${months.join('/')}, expected ${expected.month}`,
+    };
+  }
+  const years = [...new Set(hijriYearsIn(text))];
+  if (years.length > 0 && !years.includes(expected.year)) {
+    return {
+      kind: 'ignored',
+      reason: `Hijri year ${years.join('/')}, expected ${expected.year}`,
+    };
+  }
+  if (publishedMs !== null && publishedMs > evening.nowMs) {
+    return { kind: 'ignored', reason: 'published after the time of this run' };
+  }
+  const evDay = dayOfKey(eveningKey);
+  const published =
+    publishedMs === null ? null : localDayAndMinutes(publishedMs, evening.utcOffsetMinutes);
+  if (
+    published &&
+    (published.day < evDay ||
+      (published.day === evDay && published.minutes < EARLIEST_DECISION_MINUTES))
+  ) {
+    return { kind: 'ignored', reason: 'published before the committee met' };
+  }
+
+  const [ifSeen, ifNotSeen] = possibleStarts(eveningKey);
+  const plausible = stated.filter((s) => s === ifSeen || s === ifNotSeen);
+  let startDate: string;
+  let basis: 'stated' | 'inferred';
+  if (stated.length > 0) {
+    if (plausible.length !== 1 || plausible.length !== stated.length) {
+      return {
+        kind: 'ignored',
+        reason: `states a start of ${stated.join(' / ')}, possible are ${ifSeen} and ${ifNotSeen}`,
+      };
+    }
+    startDate = plausible[0] ?? '';
+    basis = 'stated';
+    if ((seen && startDate !== ifSeen) || (notSeen && startDate !== ifNotSeen)) {
+      return { kind: 'ignored', reason: `says ${seen ? 'seen' : 'not seen'} but starts ${startDate}` };
+    }
+  } else {
+    if (seen === notSeen) return { kind: 'ignored', reason: 'says both seen and not seen' };
+    // "দেখা গেছে" a day or two later is loose talk ("the month has begun"): an inferred start
+    // counts only from an article of the evening itself.
+    if (!published || published.day !== evDay) {
+      return {
+        kind: 'ignored',
+        reason: published
+          ? 'no stated start, and not published on the evening itself'
+          : 'no stated start, and no publication time',
+      };
+    }
+    startDate = seen ? ifSeen : ifNotSeen;
+    basis = 'inferred';
+  }
   return {
-    seen,
-    month,
-    hijriYear: hijriYearIn(text),
-    startDate,
-    source,
-    sameEvening: publishedKey === eveningKey || namesEvening(text, eveningKey),
+    kind: 'decision',
+    decision: {
+      seen: startDate === ifSeen,
+      month,
+      hijriYear: years[0] ?? null,
+      startDate,
+      source,
+      sameEvening: true,
+      publisher: publisher ?? domainOf(source),
+      basis,
+    },
   };
+}
+
+// Is a decision (from any source, e.g. Gemini) possible for this evening? null when it is,
+// else why not.
+export function implausibility(decision: Decision, evening: Evening): string | null {
+  const [ifSeen, ifNotSeen] = possibleStarts(evening.eveningKey);
+  if (decision.month !== evening.expected.month) {
+    return `about month ${decision.month}, expected ${evening.expected.month}`;
+  }
+  if (decision.hijriYear !== null && decision.hijriYear !== evening.expected.year) {
+    return `Hijri year ${decision.hijriYear}, expected ${evening.expected.year}`;
+  }
+  if (decision.startDate !== ifSeen && decision.startDate !== ifNotSeen) {
+    return `start ${decision.startDate}, possible are ${ifSeen} and ${ifNotSeen}`;
+  }
+  if ((decision.startDate === ifSeen) !== decision.seen) {
+    return `says ${decision.seen ? 'seen' : 'not seen'} but starts ${decision.startDate}`;
+  }
+  return null;
 }
 
 export type Outcome =
@@ -129,55 +212,62 @@ export type Outcome =
   | { action: 'commit'; monthKey: string; startDate: string; sources: string[] }
   | { action: 'issue'; reason: string; suggested: { monthKey: string; startDate: string } | null };
 
-const domainOf = (source: string) => {
+// Second-level suffixes under which the registrable domain has three labels.
+const SECOND_LEVEL = /^(?:com|gov|org|net|edu|ac|co|info|mil)\.[a-z]{2}$/;
+
+// The publisher behind a URL or host: its registrable domain, so bangla.bdnews24.com and
+// bdnews24.com, or bn.observerbd.com and www.observerbd.com, are one source, not two.
+export const domainOf = (source: string) => {
+  let host: string;
   try {
-    return new URL(source).hostname.replace(/^www\./, '');
+    host = new URL(source).hostname;
   } catch {
-    return source;
+    host = source;
   }
+  const labels = host.toLowerCase().split('.').filter(Boolean);
+  if (labels.length <= 2) return labels.join('.');
+  const lastTwo = labels.slice(-2).join('.');
+  return SECOND_LEVEL.test(lastTwo) ? labels.slice(-3).join('.') : lastTwo;
 };
 
-// What to do with the decisions found for the month expected to start next.
+// The news decision for the expected month: confident only when at least two independent
+// publishers agree (each publisher's own articles must agree too) and none disagrees. Every
+// decision passed in has already passed the plausibility check.
 export function decide(input: {
   decisions: readonly Decision[];
   expected: { year: number; month: number };
-  calculatedStart: string;
 }): Outcome {
   const { expected } = input;
   const monthKey = `${expected.year}-${String(expected.month).padStart(2, '0')}`;
-  const tonight = input.decisions.filter((d) => d.sameEvening);
+  const tonight = input.decisions.filter((d) => d.sameEvening && d.month === expected.month);
   if (tonight.length === 0) return { action: 'none', reason: 'no decision from this evening yet' };
 
-  // Independent sources: one decision per domain.
-  const byDomain = new Map<string, Decision>();
-  for (const decision of tonight) byDomain.set(domainOf(decision.source), decision);
-  const distinct = [...byDomain.values()];
-  const starts = new Set(distinct.map((d) => d.startDate));
-  const matchesMonth = (d: Decision) =>
-    d.month === expected.month && (d.hijriYear === null || d.hijriYear === expected.year);
-
-  if (starts.size === 1 && distinct.every(matchesMonth)) {
-    const startDate = distinct[0]?.startDate ?? '';
-    if (startDate === input.calculatedStart) {
-      return { action: 'none', reason: 'decision matches the calculation' };
-    }
-    const confirmedYear = distinct.some((d) => d.hijriYear === expected.year);
-    if (distinct.length >= 2 && confirmedYear) {
-      return { action: 'commit', monthKey, startDate, sources: distinct.map((d) => d.source) };
-    }
+  const byPublisher = new Map<string, Decision[]>();
+  for (const decision of tonight) {
+    const key = decision.publisher ?? domainOf(decision.source);
+    byPublisher.set(key, [...(byPublisher.get(key) ?? []), decision]);
+  }
+  const starts = new Set(tonight.map((d) => d.startDate));
+  if (starts.size > 1) {
     return {
       action: 'issue',
-      reason:
-        distinct.length < 2
-          ? 'only one source differs from the calculation'
-          : 'the Hijri year is not stated by any source',
-      suggested: { monthKey, startDate },
+      reason: `sources disagree (${[...starts].sort().join(' vs ')})`,
+      suggested: null,
+    };
+  }
+  const startDate = tonight[0]?.startDate ?? '';
+  if (byPublisher.size >= 2) {
+    return {
+      action: 'commit',
+      monthKey,
+      startDate,
+      sources: [...byPublisher.values()].map((ds) => ds[0]?.source ?? ''),
     };
   }
   return {
     action: 'issue',
-    reason: starts.size > 1 ? 'sources disagree' : 'month or Hijri year does not match',
-    suggested: null,
+    reason: 'only one independent source',
+    suggested: { monthKey, startDate },
   };
 }
 
@@ -187,7 +277,6 @@ export function decideFromNotice(input: {
   notice: Decision;
   pdfStart: string | null;
   expected: { year: number; month: number };
-  calculatedStart: string;
 }): Outcome {
   const { notice, expected } = input;
   const monthKey = `${expected.year}-${String(expected.month).padStart(2, '0')}`;
@@ -198,25 +287,5 @@ export function decideFromNotice(input: {
       suggested: null,
     };
   }
-  if (notice.startDate === input.calculatedStart) {
-    return { action: 'none', reason: 'IFB notice matches the calculation' };
-  }
   return { action: 'commit', monthKey, startDate: notice.startDate, sources: [notice.source] };
-}
-
-// The JSON to commit: only monthStarts[country][monthKey] changes.
-export function withMonthStart(
-  remote: Record<string, unknown>,
-  country: string,
-  monthKey: string,
-  startDate: string,
-): Record<string, unknown> {
-  const all =
-    typeof remote.monthStarts === 'object' && remote.monthStarts !== null
-      ? (remote.monthStarts as Record<string, Record<string, string>>)
-      : {};
-  return {
-    ...remote,
-    monthStarts: { ...all, [country]: { ...(all[country] ?? {}), [monthKey]: startDate } },
-  };
 }

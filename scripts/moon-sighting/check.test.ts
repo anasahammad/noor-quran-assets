@@ -2,8 +2,8 @@ import { describe, it } from 'node:test';
 import { expect, fn } from './testing.ts';
 import { issueText, parseNowArg, runCheck } from './check.ts';
 import { geminiAsker } from './gemini.ts';
-import { decide, extractDecision, toAsciiDigits } from './decision.ts';
-import { HttpError, moonLinks, publishedKey, type Source } from './newspapers.ts';
+import { decide, readDecision, toAsciiDigits } from './decision.ts';
+import { HttpError, moonLinks, publishedMs, type Source } from './newspapers.ts';
 import { noticePageHtml, noticeRowHtml, scannedPdf, textPdf } from './testPages.ts';
 
 // The Islamic Foundation's announcement of 11 Oct 2026 (Jumada al-Awwal 1448), as it read.
@@ -55,34 +55,57 @@ const EVENING = Date.parse('2026-10-11T20:30:00+06:00');
 // The last scheduled run of that evening, when newspapers may decide without an IFB notice.
 const LATE_EVENING = Date.parse('2026-10-11T23:35:00+06:00');
 
-describe('extractDecision (Bangla patterns)', () => {
-  it('reads the October 2026 announcement: not seen, 30 days, start 13 Oct', () => {
-    expect(extractDecision(NOT_SEEN_OCT_2026, 'if', '2026-10-11', null)).toEqual({
-      seen: false,
-      month: 5,
-      hijriYear: 1448,
-      startDate: '2026-10-13',
-      source: 'if',
-      sameEvening: true,
+describe('readDecision (full articles)', () => {
+  const OCT = {
+    eveningKey: '2026-10-11',
+    expected: { year: 1448, month: 5 },
+    utcOffsetMinutes: 360,
+    nowMs: Date.parse('2026-10-11T23:35:00+06:00'),
+  };
+  const at = (iso: string) => Date.parse(iso);
+
+  it('reads the October 2026 announcement: not seen, 30 days, start 13 Oct (stated)', () => {
+    expect(readDecision(NOT_SEEN_OCT_2026, 'https://if.gov.bd/1', OCT, null)).toEqual({
+      kind: 'decision',
+      decision: {
+        seen: false,
+        month: 5,
+        hijriYear: 1448,
+        startDate: '2026-10-13',
+        source: 'https://if.gov.bd/1',
+        sameEvening: true,
+        publisher: 'if.gov.bd',
+        basis: 'stated',
+      },
     });
   });
 
   it('a sighting starts the month tomorrow', () => {
-    expect(extractDecision(SEEN_SAME_EVENING, 's', '2026-10-11', null)).toMatchObject({
-      seen: true,
-      startDate: '2026-10-12',
+    expect(readDecision(SEEN_SAME_EVENING, 's', OCT, null)).toMatchObject({
+      kind: 'decision',
+      decision: { seen: true, startDate: '2026-10-12' },
     });
   });
 
-  it('is inconclusive when the text says both, neither, or names no month', () => {
-    expect(extractDecision('চাঁদ দেখা গেছে, চাঁদ দেখা যায়নি', 's', '2026-10-11', null)).toBeNull();
-    expect(extractDecision('কমিটির সভা সন্ধ্যায় বসবে', 's', '2026-10-11', null)).toBeNull();
-    expect(extractDecision('আজ চাঁদ দেখা গেছে', 's', '2026-10-11', null)).toBeNull();
+  it('is not a decision when the text says both, neither, or names no month', () => {
+    expect(readDecision('চাঁদ দেখা গেছে, চাঁদ দেখা যায়নি', 's', OCT, null)).toMatchObject({
+      kind: 'ignored',
+    });
+    expect(readDecision('কমিটির সভা সন্ধ্যায় বসবে', 's', OCT, null)).toEqual({ kind: 'none' });
+    expect(readDecision('আজ চাঁদ দেখা গেছে', 's', OCT, at('2026-10-11T20:00:00+06:00'))).toEqual({
+      kind: 'ignored',
+      reason: 'names no Hijri month',
+    });
   });
 
   it("an older article is not this evening's decision", () => {
-    const old = NOT_SEEN_OCT_2026.replace(/১১ অক্টোবর/, '১১ সেপ্টেম্বর');
-    expect(extractDecision(old, 's', '2026-10-11', '2026-09-11')?.sameEvening).toBe(false);
+    const old = NOT_SEEN_OCT_2026.replace(/১১ অক্টোবর/, '১১ সেপ্টেম্বর').replace(
+      /১৩ অক্টোবর/,
+      '১৩ সেপ্টেম্বর',
+    );
+    expect(readDecision(old, 's', OCT, at('2026-09-11T20:00:00+06:00'))).toMatchObject({
+      kind: 'ignored',
+    });
   });
 
   it('converts Bangla digits', () => {
@@ -90,7 +113,7 @@ describe('extractDecision (Bangla patterns)', () => {
   });
 });
 
-describe('decide', () => {
+describe('decide (news, after the plausibility check)', () => {
   const base = {
     seen: false,
     month: 5,
@@ -100,20 +123,7 @@ describe('decide', () => {
   };
   const expected = { year: 1448, month: 5 };
 
-  it('matches the calculation: nothing to do', () => {
-    expect(
-      decide({
-        decisions: [
-          { ...base, source: 'https://a.bd/1' },
-          { ...base, source: 'https://b.bd/1' },
-        ],
-        expected,
-        calculatedStart: '2026-10-13',
-      }),
-    ).toEqual({ action: 'none', reason: 'decision matches the calculation' });
-  });
-
-  it('two independent sources that differ from the calculation: commit', () => {
+  it('two independent publishers that agree: commit (also when it matches the calculation)', () => {
     expect(
       decide({
         decisions: [
@@ -121,7 +131,6 @@ describe('decide', () => {
           { ...base, source: 'https://b.bd/2' },
         ],
         expected,
-        calculatedStart: '2026-10-12',
       }),
     ).toEqual({
       action: 'commit',
@@ -131,25 +140,30 @@ describe('decide', () => {
     });
   });
 
-  it('one source, two pages of one site, or a wrong month: an issue, no commit', () => {
-    const one = decide({
-      decisions: [
-        { ...base, source: 'https://a.bd/1' },
-        { ...base, source: 'https://a.bd/2' },
-      ],
-      expected,
-      calculatedStart: '2026-10-12',
+  it('publishers named by an aggregator count separately; one site twice does not', () => {
+    const google = 'https://news.google.com/rss/articles/';
+    expect(
+      decide({
+        decisions: [
+          { ...base, source: `${google}1`, publisher: 'dhakapost.com' },
+          { ...base, source: `${google}2`, publisher: 'jagonews24.com' },
+        ],
+        expected,
+      }),
+    ).toMatchObject({ action: 'commit' });
+    expect(
+      decide({
+        decisions: [
+          { ...base, source: 'https://a.bd/1' },
+          { ...base, source: 'https://a.bd/2' },
+        ],
+        expected,
+      }),
+    ).toMatchObject({
+      action: 'issue',
+      reason: 'only one independent source',
+      suggested: { monthKey: '1448-05' },
     });
-    expect(one).toMatchObject({ action: 'issue', suggested: { monthKey: '1448-05' } });
-    const wrongMonth = decide({
-      decisions: [
-        { ...base, month: 6, source: 'https://a.bd/1' },
-        { ...base, month: 6, source: 'https://b.bd/1' },
-      ],
-      expected,
-      calculatedStart: '2026-10-12',
-    });
-    expect(wrongMonth).toMatchObject({ action: 'issue', suggested: null });
   });
 
   it('sources that disagree: an issue', () => {
@@ -158,20 +172,16 @@ describe('decide', () => {
         decisions: [
           { ...base, source: 'https://a.bd/1' },
           { ...base, seen: true, startDate: '2026-10-12', source: 'https://b.bd/1' },
+          { ...base, source: 'https://c.bd/1' },
         ],
         expected,
-        calculatedStart: '2026-10-13',
       }),
-    ).toMatchObject({ action: 'issue', reason: 'sources disagree' });
+    ).toMatchObject({ action: 'issue', reason: 'sources disagree (2026-10-12 vs 2026-10-13)' });
   });
 
   it('nothing from this evening yet: wait for the next run', () => {
     expect(
-      decide({
-        decisions: [{ ...base, sameEvening: false, source: 'https://a.bd/1' }],
-        expected,
-        calculatedStart: '2026-10-13',
-      }),
+      decide({ decisions: [{ ...base, sameEvening: false, source: 'https://a.bd/1' }], expected }),
     ).toMatchObject({ action: 'none' });
   });
 });
@@ -188,7 +198,7 @@ describe('runCheck: IFB notice first (replay, dry)', () => {
       log: (line) => lines.push(line),
     });
     expect(result.eveningKey).toBe('2026-10-11');
-    expect(result.decisions).toEqual([
+    expect(result.decisions).toMatchObject([
       {
         seen: false,
         month: 5,
@@ -200,7 +210,7 @@ describe('runCheck: IFB notice first (replay, dry)', () => {
     ]);
     expect(result.outcome).toEqual({
       action: 'none',
-      reason: 'IFB notice matches the calculation',
+      reason: 'decision matches the calculation',
     });
     expect(result.nextRemote).toBeNull();
     expect(lines).toContain('IFB notices page 1: OK, 1 rows');
@@ -303,7 +313,7 @@ describe('runCheck: newspaper fallback', () => {
     expect(result.decisions).toHaveLength(2);
     expect(result.outcome).toMatchObject({ action: 'none' });
     expect(lines).toContain('IFB: no committee notice on pages 1-2');
-    expect(lines).toContain('Source BSS: OK, 1 moon article, 1 with a decision');
+    expect(lines).toContain('Source BSS: OK, 1 moon item, 1 with a decision (bssnews.net)');
   });
 
   it('replays 11 Oct 2026 at 23:35 without an IFB notice: matches, nothing to do', async () => {
@@ -408,10 +418,17 @@ describe('geminiAsker', () => {
 });
 
 describe('page helpers', () => {
-  it('finds moon articles and their publication day', () => {
-    expect(moonLinks(list('/a/1'), 'https://x.bd/news')).toEqual(['https://x.bd/a/1']);
-    expect(publishedKey(article('x', '2026-10-11T19:45:00+06:00'), 360)).toBe('2026-10-11');
-    expect(publishedKey(article('x', '2026-10-11T19:45:00Z'), 360)).toBe('2026-10-12');
+  it('finds moon articles (headline kept) and their publication time', () => {
+    expect(moonLinks(list('/a/1'), 'https://x.bd/news')).toEqual([
+      {
+        url: 'https://x.bd/a/1',
+        summary: { text: 'জমাদিউল আউয়াল মাসের চাঁদ নিয়ে সিদ্ধান্ত', publishedMs: null },
+      },
+    ]);
+    expect(publishedMs(article('x', '2026-10-11T19:45:00+06:00'))).toBe(
+      Date.parse('2026-10-11T13:45:00Z'),
+    );
+    expect(publishedMs('<html></html>')).toBeNull();
   });
 });
 
