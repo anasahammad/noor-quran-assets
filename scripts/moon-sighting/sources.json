@@ -1,0 +1,19 @@
+[
+  {
+    "name": "Islamic Foundation (news)",
+    "url": "https://islamicfoundation.gov.bd/pages/news",
+    "kind": "list"
+  },
+  {
+    "name": "bdnews24 (Bangla, Bangladesh)",
+    "url": "https://bangla.bdnews24.com/bangladesh",
+    "kind": "list"
+  },
+  {
+    "name": "Prothom Alo (religion)",
+    "url": "https://www.prothomalo.com/religion",
+    "kind": "list"
+  },
+  { "name": "Dhaka Post (RSS)", "url": "https://www.dhakapost.com/rss/rss.xml", "kind": "rss" },
+  { "name": "Jago News 24 (RSS)", "url": "https://www.jagonews24.com/rss/rss.xml", "kind": "rss" }
+]

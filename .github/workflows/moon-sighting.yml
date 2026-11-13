@@ -1,8 +1,8 @@
 # Every evening 18:30–23:30 Dhaka: is this the 29th of a Hijri month (by the app's own calendar)?
 # Then read the National Moon Sighting Committee's decision and, if it differs from the
 # calculation, update config/remote.json "monthStarts" (only with two agreeing sources) or open
-# an issue. The script lives in the app repo (scripts/moon-sighting) and uses the app's calendar
-# code, so the Action and the app always agree.
+# an issue. The script lives in this repo (scripts/moon-sighting) and imports the app's calendar
+# code from a sparse checkout of the app repo, so the Action and the app always agree.
 name: Moon sighting
 
 on:
@@ -57,19 +57,22 @@ jobs:
           sparse-checkout: |
             src/lib/hijri
             src/config/countries
-            scripts/moon-sighting
 
       # The same Node as the app repo (its .nvmrc; a root file, so the sparse checkout has it).
       - uses: actions/setup-node@v7
         with:
           node-version-file: app/.nvmrc
 
+      # The offline tests (fixtures only, no network, no keys) guard every run.
+      - name: Run the tests
+        run: npm test
+
       - name: Check this evening's decision
         id: check
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # islamicfoundation.gov.bd does not send its intermediate certificate.
-          NODE_EXTRA_CA_CERTS: app/scripts/moon-sighting/certs/sectigo-dv-r36.pem
+          NODE_EXTRA_CA_CERTS: scripts/moon-sighting/certs/sectigo-dv-r36.pem
           DRY_RUN: ${{ inputs.dry_run }}
           NOW: ${{ inputs.now }}
         run: |
@@ -84,7 +87,7 @@ jobs:
           echo "Run: dry_run=${DRY_RUN:-false}, now=${now_trimmed:-<current time>}"
           # Node runs the app's .ts files as ES modules; the flag hides its notice about the
           # app's package.json having no "type" (which stays unchanged).
-          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON app/scripts/moon-sighting/check.ts "${args[@]}"
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/moon-sighting/check.ts "${args[@]}"
 
       - name: Commit the new month start and purge jsDelivr
         if: steps.check.outputs.action == 'commit'
