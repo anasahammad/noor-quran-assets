@@ -1,14 +1,19 @@
-# Every evening 18:30–23:30 Dhaka: is this the 29th of a Hijri month (by the app's own calendar)?
-# Then read the National Moon Sighting Committee's decision and, if it differs from the
-# calculation, update config/remote.json "monthStarts" (only with two agreeing sources) or open
-# an issue. The script lives in the app repo (scripts/moon-sighting) and uses the app's calendar
-# code, so the Action and the app always agree.
+# Moon sighting: keeps config/remote.json "monthStarts" in step with Bangladesh's National Moon
+# Sighting Committee. Every run (not only on the 29th) checks the previous, current and next
+# Hijri month by the app's own calendar; a month whose sighting evening has come and that is not
+# in monthStarts is resolved from the IFB notice (alone) or two agreeing news publishers, for up
+# to 5 days after the evening. Anything else ends in an issue, never silently.
+# The script lives in this repo (scripts/moon-sighting) and imports the app's calendar code from
+# a sparse checkout of the app repo, so the Action and the app always agree.
 name: Moon sighting
 
 on:
   schedule:
-    # GitHub cron is UTC: 12:30–17:30 UTC = 18:30–23:30 in Dhaka (UTC+6), every hour.
-    - cron: '30 12-17 * * *'
+    # GitHub cron is UTC and often runs late, so several runs per evening: 20:30, 21:30 and
+    # 23:30 Dhaka (UTC+6), plus 09:00 the next morning to catch up. Days without a due month
+    # finish in seconds without fetching anything.
+    - cron: '30 14,15,17 * * *'
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -32,7 +37,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out this repo
         uses: actions/checkout@v7
@@ -57,19 +62,25 @@ jobs:
           sparse-checkout: |
             src/lib/hijri
             src/config/countries
-            scripts/moon-sighting
 
       # The same Node as the app repo (its .nvmrc; a root file, so the sparse checkout has it).
       - uses: actions/setup-node@v7
         with:
           node-version-file: app/.nvmrc
 
-      - name: Check this evening's decision
+      # The offline tests (fixtures only, no network, no keys) guard every run.
+      - name: Run the tests
+        run: npm test
+
+      - name: Check the sighting evenings
         id: check
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Optional repository variable; empty = the script's default (gemini-flash-latest).
+          # The run checks it exists first and reports a missing model in an issue.
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           # islamicfoundation.gov.bd does not send its intermediate certificate.
-          NODE_EXTRA_CA_CERTS: app/scripts/moon-sighting/certs/sectigo-dv-r36.pem
+          NODE_EXTRA_CA_CERTS: scripts/moon-sighting/certs/sectigo-dv-r36.pem
           DRY_RUN: ${{ inputs.dry_run }}
           NOW: ${{ inputs.now }}
         run: |
@@ -84,17 +95,16 @@ jobs:
           echo "Run: dry_run=${DRY_RUN:-false}, now=${now_trimmed:-<current time>}"
           # Node runs the app's .ts files as ES modules; the flag hides its notice about the
           # app's package.json having no "type" (which stays unchanged).
-          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON app/scripts/moon-sighting/check.ts "${args[@]}"
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/moon-sighting/check.ts "${args[@]}"
 
-      - name: Commit the new month start and purge jsDelivr
-        if: steps.check.outputs.action == 'commit'
+      - name: Commit the month starts and purge jsDelivr
+        if: steps.check.outputs.action == 'commit' && inputs.dry_run != true
         env:
-          TITLE: ${{ steps.check.outputs.title }}
+          TITLE: ${{ steps.check.outputs.commit_title }}
         run: |
           node -e "JSON.parse(require('fs').readFileSync('config/remote.json', 'utf8'))"
-          # Only config/remote.json may change (app/ is the app checkout and moon-sighting-issue.md
-          # the issue text; both are untracked and never committed).
-          test "$(git status --porcelain | grep -v ' config/remote.json$' | grep -v ' app/$' | grep -v 'moon-sighting-issue.md' | wc -l)" = "0"
+          # Only config/remote.json may change (app/ is the app checkout, untracked).
+          test "$(git status --porcelain | grep -v ' config/remote.json$' | grep -v ' app/$' | wc -l)" = "0"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add config/remote.json
@@ -102,16 +112,31 @@ jobs:
           git push
           curl -fsS "https://purge.jsdelivr.net/gh/${{ github.repository }}@main/config/remote.json"
 
-      - name: Open an issue (once per title)
-        if: steps.check.outputs.action == 'commit' || steps.check.outputs.action == 'issue'
+      # One issue per title. "update": created, or commented on (and reopened) by every later run
+      # that still has no decision. "once": created only if no issue has that title yet.
+      - name: Open or update issues
+        if: steps.check.outputs.issues_file != '' && inputs.dry_run != true
         env:
           GH_TOKEN: ${{ github.token }}
-          TITLE: ${{ steps.check.outputs.title }}
-          BODY_FILE: ${{ steps.check.outputs.body_file }}
+          ISSUES_FILE: ${{ steps.check.outputs.issues_file }}
         run: |
-          existing=$(gh issue list --state all --search "in:title \"$TITLE\"" --json title --jq "map(select(.title == env.TITLE)) | length")
-          if [ "$existing" = "0" ]; then
-            gh issue create --title "$TITLE" --body-file "$BODY_FILE"
-          else
-            echo "An issue with this title already exists."
-          fi
+          count=$(jq length "$ISSUES_FILE")
+          for i in $(seq 0 $((count - 1))); do
+            export TITLE="$(jq -r ".[$i].title" "$ISSUES_FILE")"
+            mode="$(jq -r ".[$i].mode" "$ISSUES_FILE")"
+            body="$RUNNER_TEMP/moon-sighting-issue-$i.md"
+            jq -r ".[$i].body" "$ISSUES_FILE" > "$body"
+            # Exact title match in jq (titles contain quotes and parentheses, which the search
+            # syntax would need escaping for); this repo has few issues.
+            found=$(gh issue list --state all --limit 1000 --json number,state,title \
+              --jq 'map(select(.title == env.TITLE)) | first | if . == null then "" else "\(.number) \(.state)" end')
+            if [ -z "$found" ]; then
+              gh issue create --title "$TITLE" --body-file "$body"
+            elif [ "$mode" = "update" ]; then
+              read -r number state <<< "$found"
+              if [ "$state" = "CLOSED" ]; then gh issue reopen "$number"; fi
+              gh issue comment "$number" --body-file "$body"
+            else
+              echo "Issue already exists: $TITLE"
+            fi
+          done

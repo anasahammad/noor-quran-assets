@@ -1,0 +1,9 @@
+{
+  "name": "noor-quran-assets-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Scripts for the noor-quran-assets Actions. The app's calendar code is read from ./app (see scripts/moon-sighting/README.md).",
+  "scripts": {
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"scripts/**/*.test.ts\""
+  }
+}
