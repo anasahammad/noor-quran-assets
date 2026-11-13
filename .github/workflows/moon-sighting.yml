@@ -71,6 +71,9 @@ jobs:
         id: check
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Optional repository variable; empty = the script's default (gemini-flash-latest).
+          # The run checks it exists first and reports a missing model in an issue.
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           # islamicfoundation.gov.bd does not send its intermediate certificate.
           NODE_EXTRA_CA_CERTS: scripts/moon-sighting/certs/sectigo-dv-r36.pem
           DRY_RUN: ${{ inputs.dry_run }}

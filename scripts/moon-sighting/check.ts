@@ -21,7 +21,7 @@ import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { bd } from '../../app/src/config/countries/bd.ts';
-import { createHijriCalendar, dayOfKey, keyOfDay, monthKey } from '../../app/src/lib/hijri/calendar.ts';
+import { createHijriCalendar, keyOfDay, monthKey } from '../../app/src/lib/hijri/calendar.ts';
 import { isValidDateKey, parseRemoteConfig } from '../../app/src/lib/hijri/remoteSchema.ts';
 import {
   decide,
@@ -30,6 +30,14 @@ import {
   type Decision,
   type Outcome,
 } from './decision.ts';
+import {
+  checkGeminiModel,
+  DEFAULT_GEMINI_MODEL,
+  geminiAsker,
+  geminiOff,
+  geminiProblem,
+  type GeminiStatus,
+} from './gemini.ts';
 import { readIfbNotice } from './ifb.ts';
 import {
   HttpError,
@@ -210,81 +218,29 @@ export async function runCheck(deps: CheckDeps): Promise<CheckResult> {
   return { outcome, decisions, eveningKey, nextRemote };
 }
 
-// The Gemini fallback (free tier), constrained to a JSON schema; anything inconsistent is dropped.
-export function geminiAsker(apiKey: string, fetchImpl: typeof fetch = fetch) {
-  return async (text: string, eveningKey: string, url: string): Promise<Decision | null> => {
-    const prompt = `This is a Bangladeshi news article (${url}). Did Bangladesh's National Moon Sighting Committee (Islamic Foundation) decide on the evening of ${eveningKey} whether the new Hijri month's crescent was seen? Answer only from the text. month is 1-12 (Muharram=1), startDate is the first day of that month (YYYY-MM-DD), meetingDate is the date of the committee meeting the article reports. If the article does not report such a decision, set conclusive=false.\n\n${text.slice(0, 12_000)}`;
-    const response = await fetchImpl(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: 'OBJECT',
-              properties: {
-                conclusive: { type: 'BOOLEAN' },
-                seen: { type: 'BOOLEAN' },
-                month: { type: 'INTEGER' },
-                hijriYear: { type: 'INTEGER' },
-                startDate: { type: 'STRING' },
-                meetingDate: { type: 'STRING' },
-                source: { type: 'STRING' },
-              },
-              required: [
-                'conclusive',
-                'seen',
-                'month',
-                'hijriYear',
-                'startDate',
-                'meetingDate',
-                'source',
-              ],
-            },
-          },
-        }),
-      },
-    );
-    if (!response.ok) throw new Error(`Gemini: HTTP ${response.status}`);
-    const body = (await response.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const raw = body.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!raw) return null;
-    const answer = JSON.parse(raw) as {
-      conclusive: boolean;
-      seen: boolean;
-      month: number;
-      hijriYear: number;
-      startDate: string;
-      meetingDate: string;
-    };
-    const expectedStart = keyOfDay(dayOfKey(eveningKey) + (answer.seen ? 1 : 2));
-    const consistent =
-      answer.conclusive &&
-      Number.isInteger(answer.month) &&
-      answer.month >= 1 &&
-      answer.month <= 12 &&
-      isValidDateKey(answer.startDate) &&
-      answer.startDate === expectedStart;
-    if (!consistent) return null;
+// Markdown for the GitHub issue. A Gemini problem (missing model, HTTP errors) is always reported:
+// in the run's issue, or in its own issue when there is none.
+export function issueText(
+  result: CheckResult,
+  gemini: GeminiStatus | null = null,
+): { title: string; body: string } | null {
+  const problem = gemini ? geminiProblem(gemini) : null;
+  const geminiBlock =
+    gemini && problem
+      ? `\n\n## ⚠️ Gemini\n\n${problem}${gemini.available.length > 0 ? `\n\nModels this key can use: ${gemini.available.map((m) => `\`${m}\``).join(', ')}` : ''}\n\nSet the repository variable \`GEMINI_MODEL\` (Settings > Secrets and variables > Actions > Variables) to a model that exists.`
+      : '';
+  const issue = baseIssueText(result);
+  if (issue) return { ...issue, body: `${issue.body}${geminiBlock}` };
+  if (gemini && problem) {
     return {
-      seen: answer.seen,
-      month: answer.month,
-      hijriYear: Number.isInteger(answer.hijriYear) ? answer.hijriYear : null,
-      startDate: answer.startDate,
-      source: url,
-      sameEvening: answer.meetingDate === eveningKey,
+      title: `Moon sighting: Gemini model "${gemini.model}" is not usable`,
+      body: `The moon-sighting check cannot use Gemini (the Bangla patterns still work).${geminiBlock}`,
     };
-  };
+  }
+  return null;
 }
 
-// Markdown for the GitHub issue.
-export function issueText(result: CheckResult): { title: string; body: string } | null {
+function baseIssueText(result: CheckResult): { title: string; body: string } | null {
   const { outcome } = result;
   const table = result.decisions
     .map(
@@ -386,6 +342,16 @@ async function main() {
   const remoteJson = JSON.parse(readFileSync(remotePath, 'utf8')) as Record<string, unknown>;
   const sources = JSON.parse(readFileSync(sourcesPath, 'utf8')) as Source[];
   const apiKey = process.env.GEMINI_API_KEY;
+  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  // First thing: is the configured model there? (On 10 Nov 2026 it was not: HTTP 404.)
+  const gemini = apiKey ? await checkGeminiModel(apiKey, model) : geminiOff(model);
+  console.log(
+    gemini.state === 'off'
+      ? 'Gemini: off (no GEMINI_API_KEY)'
+      : gemini.state === 'ok'
+        ? `Gemini: model ${model} OK`
+        : `::error title=Gemini model ${model} is not usable::${gemini.problem ?? gemini.state}${gemini.available.length ? `. Available: ${gemini.available.join(', ')}` : ''}`,
+  );
 
   const result = await runCheck({
     // An empty --now (the scheduled runs) means the real current time.
@@ -394,13 +360,15 @@ async function main() {
     sources,
     fetchText: async (url) => (await browserFetch(url)).text(),
     fetchBytes: async (url) => new Uint8Array(await (await browserFetch(url)).arrayBuffer()),
-    askGemini: apiKey ? geminiAsker(apiKey) : undefined,
+    askGemini:
+      apiKey && gemini.state === 'ok' ? geminiAsker(apiKey, fetch, { model, status: gemini }) : undefined,
     log: (line) => console.log(line),
   });
   console.log(`Outcome: ${JSON.stringify(result.outcome)}`);
+  for (const error of gemini.errors) console.log(`::error title=Gemini ${model}::${error}`);
 
-  const action = result.outcome.action;
-  const issue = issueText(result);
+  const issue = issueText(result, gemini);
+  const action = result.outcome.action === 'commit' ? 'commit' : issue ? 'issue' : 'none';
   const outputPath = process.env.GITHUB_OUTPUT;
   if (dryRun) {
     if (result.nextRemote)
@@ -416,7 +384,7 @@ async function main() {
     if (issue) writeFileSync(bodyFile, issue.body);
     appendFileSync(
       outputPath,
-      `action=${action === 'commit' || action === 'issue' ? action : 'none'}\n` +
+      `action=${action}\n` +
         (issue ? `title=${issue.title}\nbody_file=${bodyFile}\n` : ''),
     );
   }

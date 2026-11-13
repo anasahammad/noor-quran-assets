@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import { expect, fn } from './testing.ts';
-import { geminiAsker, issueText, parseNowArg, runCheck } from './check.ts';
+import { issueText, parseNowArg, runCheck } from './check.ts';
+import { geminiAsker } from './gemini.ts';
 import { decide, extractDecision, toAsciiDigits } from './decision.ts';
 import { HttpError, moonLinks, publishedKey, type Source } from './newspapers.ts';
 import { noticePageHtml, noticeRowHtml, scannedPdf, textPdf } from './testPages.ts';
