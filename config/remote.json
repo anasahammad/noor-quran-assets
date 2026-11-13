@@ -1,1 +1,5 @@
-   { "schema": 1, "hijriOffset": { "BD": 0 } }
+{
+  "schema": 2,
+  "hijriOffset": { "BD": 0 },
+  "monthStarts": { "BD": { "1448-05": "2026-10-13", "1448-06": "2026-11-12" } }
+}
